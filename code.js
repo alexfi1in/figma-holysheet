@@ -182,13 +182,16 @@ function transformLayout(variantInfo, positionMap, componentSet) {
 /** ========== [ MAIN ] ========== **/
 // Entry point: validates selection, analyzes variants, builds layout, applies changes and closes the plugin
 function run() {
-    const selection = figma.currentPage.selection.filter((n) => n.type === 'COMPONENT_SET');
-    if (selection.length === 0) {
-        log('Please select at least one ComponentSet.', 'error');
+    let selected = figma.currentPage.selection.filter((n) => n.type === 'COMPONENT_SET');
+    if (selected.length === 0) {
+        selected = figma.currentPage.findAll((n) => n.type === 'COMPONENT_SET');
+    }
+    if (selected.length === 0) {
+        log('No ComponentSets found to process.', 'error');
         figma.closePlugin();
         return;
     }
-    const sorted = sortComponentSetsByNameAsc(selection);
+    const sorted = sortComponentSetsByNameAsc(selected);
     let successCount = 0;
     let offsetX = 0;
     for (const componentSet of sorted) {
@@ -204,14 +207,12 @@ function run() {
             log(`Variant: ${key} → x: ${pos === null || pos === void 0 ? void 0 : pos.x}, y: ${pos === null || pos === void 0 ? void 0 : pos.y}`);
         });
         transformLayout(variantInfo, positionMap, componentSet);
-        // Position each ComponentSet with spacing and align to top
         componentSet.x = offsetX;
         componentSet.y = 0;
         offsetX += componentSet.width + CONFIG.gapBetweenSets;
         log(`📐 Final component size: ${componentSet.width} × ${componentSet.height}`);
         successCount++;
     }
-    // Reorder in layer panel by name (ascending)
     const parent = sorted[0].parent;
     if (parent) {
         for (let i = sorted.length - 1; i >= 0; i--) {

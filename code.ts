@@ -225,16 +225,18 @@ function transformLayout(
 /** ========== [ MAIN ] ========== **/
 // Entry point: validates selection, analyzes variants, builds layout, applies changes and closes the plugin
 function run(): void {
-  const selection = figma.currentPage.selection.filter((n) => n.type === 'COMPONENT_SET') as ComponentSetNode[];
+  let selected = figma.currentPage.selection.filter((n) => n.type === 'COMPONENT_SET') as ComponentSetNode[];
+  if (selected.length === 0) {
+    selected = figma.currentPage.findAll((n) => n.type === 'COMPONENT_SET') as ComponentSetNode[];
+  }
 
-  if (selection.length === 0) {
-    log('Please select at least one ComponentSet.', 'error');
+  if (selected.length === 0) {
+    log('No ComponentSets found to process.', 'error');
     figma.closePlugin();
     return;
   }
 
-  const sorted = sortComponentSetsByNameAsc(selection);
-
+  const sorted = sortComponentSetsByNameAsc(selected);
   let successCount = 0;
   let offsetX = 0;
 
@@ -254,7 +256,6 @@ function run(): void {
 
     transformLayout(variantInfo, positionMap, componentSet);
 
-    // Position each ComponentSet with spacing and align to top
     componentSet.x = offsetX;
     componentSet.y = 0;
     offsetX += componentSet.width + CONFIG.gapBetweenSets;
@@ -263,7 +264,6 @@ function run(): void {
     successCount++;
   }
 
-  // Reorder in layer panel by name (ascending)
   const parent = sorted[0].parent;
   if (parent) {
     for (let i = sorted.length - 1; i >= 0; i--) {
