@@ -28,12 +28,12 @@ function resetConstraintsRecursively(node) {
 function validateSelection() {
     const selection = figma.currentPage.selection;
     if (selection.length !== 1) {
-        log('Выделите ровно один набор вариантов (ComponentSet).', 'error');
+        log('Select exactly one ComponentSet.', 'error');
         return null;
     }
     const node = selection[0];
     if (node.type !== 'COMPONENT_SET') {
-        log('Выделенный объект не является набором вариантов (ComponentSet).', 'error');
+        log('Selected object is not a ComponentSet.', 'error');
         return null;
     }
     return node;
@@ -52,7 +52,7 @@ function analyzeVariantProperties(componentSet) {
             properties = (_a = child.variantProperties) !== null && _a !== void 0 ? _a : {};
         }
         catch (e) {
-            log('Не удалось прочитать свойства варианта. Возможно, он повреждён или содержит конфликтующие значения.', 'error');
+            log('Failed to read variant properties. It may be broken or contain conflicting values.', 'error');
             figma.closePlugin();
             return null;
         }
@@ -65,12 +65,12 @@ function analyzeVariantProperties(componentSet) {
         });
     }
     if (variants.length === 0) {
-        log('В наборе вариантов не найдено ни одного варианта. Проверьте структуру ComponentSet.', 'error');
+        log('No variants found in the ComponentSet. Please check its structure.', 'error');
         figma.closePlugin();
         return null;
     }
     if (propertyKeysSet.size === 0) {
-        log('Не обнаружены variant-свойства в ComponentSet. Проверьте правильность структуры.', 'error');
+        log('No variant properties detected in the ComponentSet. Please verify its structure.', 'error');
         figma.closePlugin();
         return null;
     }
@@ -79,9 +79,9 @@ function analyzeVariantProperties(componentSet) {
     for (const variant of variants) {
         const key = Array.from(propertyKeysSet).map(k => { var _a; return (_a = variant.properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
         if (seenKeys.has(key)) {
-            log(`Некоторые варианты имеют одинаковые значения свойств: ${key}.
+            log(`Some variants have duplicate property values: ${key}.
 
-Figma также укажет на конфликт. Пожалуйста, скорректируйте свойства, чтобы они были уникальны.`, 'error');
+Figma will also highlight the conflict. Please ensure each variant has unique property values.`, 'error');
             figma.closePlugin();
             return null;
         }
@@ -174,20 +174,20 @@ function run() {
         figma.closePlugin();
         return;
     }
-    log("Выделен корректный ComponentSet. Анализируем variant-свойства...");
+    log("Valid ComponentSet selected. Analyzing variant properties.....");
     const variantInfo = analyzeVariantProperties(componentSet);
     if (!variantInfo)
         return;
     const positionMap = planLayoutWithSizeOnXColorOnY(variantInfo);
-    log(`Построена сетка с ${positionMap.size} позициями.`);
+    log(`Layout grid created with ${positionMap.size} positions.`);
     variantInfo.variants.forEach((v) => {
         const key = variantInfo.propertyKeys.map((k) => { var _a; return (_a = v.properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
         const pos = positionMap.get(key);
-        log(`Вариант: ${key} → x: ${pos === null || pos === void 0 ? void 0 : pos.x}, y: ${pos === null || pos === void 0 ? void 0 : pos.y}`);
+        log(`Variant: ${key} → x: ${pos === null || pos === void 0 ? void 0 : pos.x}, y: ${pos === null || pos === void 0 ? void 0 : pos.y}`);
     });
     transformLayout(variantInfo, positionMap, componentSet);
-    log(`📐 Итоговый размер компонента: ${componentSet.width} × ${componentSet.height}`);
-    figma.notify("✅ Готово!");
+    log(`📐 Final component size: ${componentSet.width} × ${componentSet.height}`);
+    figma.notify("✅ Done!");
     figma.closePlugin();
 }
 run();
