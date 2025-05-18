@@ -40,21 +40,6 @@ function resetConstraintsRecursively(node) {
 function variantKey(properties, keys) {
     return keys.map((k) => { var _a; return (_a = properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
 }
-/** ========== [ VALIDATION ] ========== **/
-// Ensures the current Figma selection is a single ComponentSet, otherwise returns null
-function validateSelection() {
-    const selection = figma.currentPage.selection;
-    if (selection.length !== 1) {
-        log('Select exactly one ComponentSet.', 'error');
-        return null;
-    }
-    const node = selection[0];
-    if (node.type !== 'COMPONENT_SET') {
-        log('Selected object is not a ComponentSet.', 'error');
-        return null;
-    }
-    return node;
-}
 /** ========== [ ANALYSIS ] ========== **/
 // Parses variant properties from all components inside the ComponentSet and checks for errors or duplicates
 function analyzeVariantProperties(componentSet) {
@@ -187,25 +172,30 @@ function transformLayout(variantInfo, positionMap, componentSet) {
 /** ========== [ MAIN ] ========== **/
 // Entry point: validates selection, analyzes variants, builds layout, applies changes and closes the plugin
 function run() {
-    const componentSet = validateSelection();
-    if (!componentSet) {
+    const selection = figma.currentPage.selection.filter((n) => n.type === 'COMPONENT_SET');
+    if (selection.length === 0) {
+        log('Please select at least one ComponentSet.', 'error');
         figma.closePlugin();
         return;
     }
-    log("Valid ComponentSet selected. Analyzing variant properties.....");
-    const variantInfo = analyzeVariantProperties(componentSet);
-    if (!variantInfo)
-        return;
-    const positionMap = planLayoutWithSizeOnXColorOnY(variantInfo);
-    log(`Layout grid created with ${positionMap.size} positions.`);
-    variantInfo.variants.forEach((v) => {
-        const key = variantKey(v.properties, variantInfo.propertyKeys);
-        const pos = positionMap.get(key);
-        log(`Variant: ${key} → x: ${pos === null || pos === void 0 ? void 0 : pos.x}, y: ${pos === null || pos === void 0 ? void 0 : pos.y}`);
-    });
-    transformLayout(variantInfo, positionMap, componentSet);
-    log(`📐 Final component size: ${componentSet.width} × ${componentSet.height}`);
-    figma.notify("✅ Done!");
+    let successCount = 0;
+    for (const componentSet of selection) {
+        log(`Processing ComponentSet: ${componentSet.name}`);
+        const variantInfo = analyzeVariantProperties(componentSet);
+        if (!variantInfo)
+            continue;
+        const positionMap = planLayoutWithSizeOnXColorOnY(variantInfo);
+        log(`Layout grid created with ${positionMap.size} positions.`);
+        variantInfo.variants.forEach((v) => {
+            const key = variantKey(v.properties, variantInfo.propertyKeys);
+            const pos = positionMap.get(key);
+            log(`Variant: ${key} → x: ${pos === null || pos === void 0 ? void 0 : pos.x}, y: ${pos === null || pos === void 0 ? void 0 : pos.y}`);
+        });
+        transformLayout(variantInfo, positionMap, componentSet);
+        log(`📐 Final component size: ${componentSet.width} × ${componentSet.height}`);
+        successCount++;
+    }
+    figma.notify(`✅ Done! ${successCount} ComponentSet${successCount === 1 ? '' : 's'} updated.`);
     figma.closePlugin();
 }
 run();
