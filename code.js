@@ -1,14 +1,7 @@
 "use strict";
-/**
- * HolySheet — Figma-плагин для интеллектуального переупорядочивания и размещения вариантов внутри выбранного ComponentSet.
- *
- * Архитектурные принципы:
- * — Модульность: каждая функция выполняет отдельную задачу.
- * — Безопасность: только работа внутри выбранного узла, без внешних изменений.
- * — Расширяемость: архитектура упрощает добавление новых сценариев.
- * — Лаконичный UX: ошибки и статус — только в консоль/уведомление.
- */
+/** ========== [ CONSTANTS ] ========== **/
 const PADDING = 20;
+/** ========== [ UTILS ] ========== **/
 function log(message, type = 'info') {
     if (type === 'error') {
         figma.notify(message, { error: true });
@@ -18,6 +11,20 @@ function log(message, type = 'info') {
         console.log('[HolySheet]', message);
     }
 }
+function resetConstraintsRecursively(node) {
+    if ("constraints" in node) {
+        node.constraints = {
+            horizontal: "MIN",
+            vertical: "MIN"
+        };
+    }
+    if ("children" in node) {
+        for (const child of node.children) {
+            resetConstraintsRecursively(child);
+        }
+    }
+}
+/** ========== [ VALIDATION ] ========== **/
 function validateSelection() {
     const selection = figma.currentPage.selection;
     if (selection.length !== 1) {
@@ -31,6 +38,7 @@ function validateSelection() {
     }
     return node;
 }
+/** ========== [ ANALYSIS ] ========== **/
 function analyzeVariantProperties(componentSet) {
     var _a;
     const propertyKeysSet = new Set();
@@ -39,7 +47,15 @@ function analyzeVariantProperties(componentSet) {
     for (const child of componentSet.children) {
         if (child.type !== 'COMPONENT')
             continue;
-        const properties = (_a = child.variantProperties) !== null && _a !== void 0 ? _a : {};
+        let properties;
+        try {
+            properties = (_a = child.variantProperties) !== null && _a !== void 0 ? _a : {};
+        }
+        catch (e) {
+            log('Не удалось прочитать свойства варианта. Возможно, он повреждён или содержит конфликтующие значения.', 'error');
+            figma.closePlugin();
+            return null;
+        }
         variants.push({ node: child, properties });
         Object.entries(properties).forEach(([key, value]) => {
             propertyKeysSet.add(key);
@@ -58,12 +74,26 @@ function analyzeVariantProperties(componentSet) {
         figma.closePlugin();
         return null;
     }
+    // Проверка на дублирующиеся variant-свойства
+    const seenKeys = new Set();
+    for (const variant of variants) {
+        const key = Array.from(propertyKeysSet).map(k => { var _a; return (_a = variant.properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
+        if (seenKeys.has(key)) {
+            log(`Некоторые варианты имеют одинаковые значения свойств: ${key}.
+
+Figma также укажет на конфликт. Пожалуйста, скорректируйте свойства, чтобы они были уникальны.`, 'error');
+            figma.closePlugin();
+            return null;
+        }
+        seenKeys.add(key);
+    }
     return {
         propertyKeys: Array.from(propertyKeysSet),
         propertyValues,
         variants,
     };
 }
+/** ========== [ LAYOUT LOGIC ] ========== **/
 function planLayoutWithSizeOnXColorOnY(variantInfo, step = 48, setProp = "Set", styleProp = "Style", colorProp = "Color", sizeProp = "Size") {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const setGroups = new Map();
@@ -98,9 +128,10 @@ function planLayoutWithSizeOnXColorOnY(variantInfo, step = 48, setProp = "Set", 
     }
     return positionMap;
 }
-function applyLayout(variantInfo, positionMap) {
-    // Сброс всех координат до раскладки — чтобы избежать накопленного смещения при повторных запусках
+/** ========== [ TRANSFORMATIONS ] ========== **/
+function transformLayout(variantInfo, positionMap, componentSet) {
     for (const variant of variantInfo.variants) {
+        resetConstraintsRecursively(variant.node);
         variant.node.x = 0;
         variant.node.y = 0;
     }
@@ -114,40 +145,29 @@ function applyLayout(variantInfo, positionMap) {
         variant.node.x = pos.x;
         variant.node.y = pos.y;
     }
-}
-function sortLayersByPosition(componentSet) {
     const children = componentSet.children.slice();
-    children.sort((a, b) => {
-        if (a.y === b.y)
-            return a.x - b.x;
-        return a.y - b.y;
-    });
+    children.sort((a, b) => (a.y === b.y ? a.x - b.x : a.y - b.y));
     for (let i = 0; i < children.length; i++) {
         componentSet.insertChild(i, children[i]);
     }
-}
-function resizeComponentToFitChildren(node) {
-    if (node.children.length === 0)
+    if (componentSet.children.length === 0)
         return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const child of node.children) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const child of componentSet.children) {
         minX = Math.min(minX, child.x);
         minY = Math.min(minY, child.y);
         maxX = Math.max(maxX, child.x + child.width);
         maxY = Math.max(maxY, child.y + child.height);
     }
-    // Смещаем всех так, чтобы minX/minY оказались на PADDING
-    for (const child of node.children) {
+    for (const child of componentSet.children) {
         child.x -= (minX - PADDING);
         child.y -= (minY - PADDING);
     }
     const newWidth = maxX - minX + PADDING * 2;
     const newHeight = maxY - minY + PADDING * 2;
-    node.resize(newWidth, newHeight);
+    componentSet.resize(newWidth, newHeight);
 }
+/** ========== [ MAIN ] ========== **/
 function run() {
     const componentSet = validateSelection();
     if (!componentSet) {
@@ -156,9 +176,8 @@ function run() {
     }
     log("Выделен корректный ComponentSet. Анализируем variant-свойства...");
     const variantInfo = analyzeVariantProperties(componentSet);
-    if (!variantInfo) {
+    if (!variantInfo)
         return;
-    }
     const positionMap = planLayoutWithSizeOnXColorOnY(variantInfo);
     log(`Построена сетка с ${positionMap.size} позициями.`);
     variantInfo.variants.forEach((v) => {
@@ -166,9 +185,7 @@ function run() {
         const pos = positionMap.get(key);
         log(`Вариант: ${key} → x: ${pos === null || pos === void 0 ? void 0 : pos.x}, y: ${pos === null || pos === void 0 ? void 0 : pos.y}`);
     });
-    applyLayout(variantInfo, positionMap);
-    sortLayersByPosition(componentSet);
-    resizeComponentToFitChildren(componentSet);
+    transformLayout(variantInfo, positionMap, componentSet);
     log(`📐 Итоговый размер компонента: ${componentSet.width} × ${componentSet.height}`);
     figma.notify("✅ Готово!");
     figma.closePlugin();
