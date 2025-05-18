@@ -1,33 +1,80 @@
-# HolySheet — Figma Plugin
+# HolySheet – Figma Plugin
 
-**HolySheet** is an internal plugin created by DevExpress for managing and auto-arranging large sets of icon variants inside a Figma ComponentSet.
+**HolySheet** is an internal plugin created by DevExpress for managing and auto-arranging large sets of icon variants inside a Figma `ComponentSet`.
 
-It was designed specifically for our icon libraries to ensure visual consistency, clean layer order, and efficient layout — all based on variant properties such as `Set`, `Style`, `Color`, and `Size`.
+It is tailored specifically for our icon libraries to ensure:
+- Visual consistency
+- Clean layer structure
+- Efficient grid-based layout based on variant properties
 
-# How it works
 
-1. **Selection check**  
-   The plugin verifies that exactly one `ComponentSet` is selected. If not, it exits with an error.
 
-2. **Variant parsing**  
-   It analyzes all variants inside the selected `ComponentSet`, reads their `variantProperties`, and validates them.  
-   If any variant is broken or shares duplicate property values, the plugin stops and informs the user.
+## ⚙️ How it works
 
-3. **Layout planning**  
-   It generates a grid layout using the following logic:
-   - `Set` → horizontal blocks (grouped along X)
-   - `Style` and `Color` → vertical rows and lines (Y)
-   - `Size` → individual columns (X)
+### 🔁 Flow Overview
 
-4. **Constraint cleanup**  
-   All nested constraints on each variant are reset to `MIN/MIN` to prevent stretching or misalignment during positioning.
+```
+[Selection or whole page]
+        ↓
+[Analyze variants]
+        ↓
+[Validate + deduplicate]
+        ↓
+[Plan grid layout]
+        ↓
+[Reset constraints to MIN/MIN]
+        ↓
+[Position + reorder variants]
+        ↓
+[Resize each ComponentSet to fit]
+        ↓
+[Reposition sets horizontally]
+        ↓
+[Zoom to view] → ✅ Done!
+```
 
-5. **Positioning & sorting**  
-   Each variant is placed in its calculated position.  
-   The children of the `ComponentSet` are then reordered by coordinates to maintain a clean layer structure.
+### 🧭 Grid Layout Strategy
 
-6. **Auto-resize**  
-   The `ComponentSet` is resized to tightly fit its children, applying uniform padding.
+- **Set** → horizontal blocks
+- **Style + Color** → vertical rows and lines
+- **Size** → horizontal columns inside each block
 
-7. **Success message**  
-   A success notification is shown when the operation completes.
+
+
+## 🧪 Behavior Summary
+
+1. ✅ Accepts:
+   - Single or multiple selected `ComponentSet` nodes
+   - If nothing is selected, processes **all ComponentSets** on the page
+
+2. 🧹 Cleans:
+   - Resets variant constraints (`MIN/MIN`) to avoid layout stretching issues
+
+3. 📐 Positions:
+   - Calculates layout using properties: `Set`, `Style`, `Color`, and `Size`
+   - Sorts variants alphabetically
+   - Places `ComponentSets` side-by-side with padding
+
+4. 🎯 Finishes:
+   - Resizes each `ComponentSet` to fit its content
+   - Zooms into updated sets
+   - Notifies user with success summary
+
+
+
+## 🔧 Customization
+
+Adjust layout logic in `CONFIG` section of the plugin code:
+```ts
+const CONFIG = {
+  padding: 20,
+  step: 48,
+  gapBetweenSets: 40,
+  props: {
+    set: "Set",
+    style: "Style",
+    color: "Color",
+    size: "Size"
+  }
+};
+```
