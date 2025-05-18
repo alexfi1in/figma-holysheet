@@ -1,7 +1,5 @@
 # HolySheet – Figma Plugin
 
-![cover-small@2x](https://github.com/user-attachments/assets/18069bbc-5b2e-46dc-a31e-63518d9dfb0b)
-
 **HolySheet** is an internal plugin created by DevExpress for managing and auto-arranging large sets of icon variants inside a Figma `ComponentSet`.
 
 It is tailored specifically for our icon libraries to ensure:
