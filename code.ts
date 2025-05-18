@@ -3,6 +3,7 @@
 const CONFIG = {
   padding: 20,
   step: 48,
+  gapBetweenSets: 40,
   props: {
     set: "Set",
     style: "Style",
@@ -40,6 +41,16 @@ function resetConstraintsRecursively(node: SceneNode): void {
 // Returns a unique key string from variant properties and key order
 function variantKey(properties: Record<string, string>, keys: string[]): string {
   return keys.map((k) => properties[k] ?? "").join("|");
+}
+
+// Sorts variants by node name
+function sortVariantsByName(variants: Variant[]): void {
+  variants.sort((a, b) => a.node.name.localeCompare(b.node.name));
+}
+
+// Sorts ComponentSets by name ascending
+function sortComponentSetsByNameAsc(sets: ComponentSetNode[]): ComponentSetNode[] {
+  return sets.slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** ========== [ TYPES ] ========== **/
@@ -105,6 +116,8 @@ Figma will also highlight the conflict. Please ensure each variant has unique pr
     }
     seenKeys.add(key);
   }
+
+  sortVariantsByName(variants);
 
   return {
     propertyKeys: Array.from(propertyKeysSet),
@@ -220,9 +233,12 @@ function run(): void {
     return;
   }
 
-  let successCount = 0;
+  const sorted = sortComponentSetsByNameAsc(selection);
 
-  for (const componentSet of selection) {
+  let successCount = 0;
+  let offsetX = 0;
+
+  for (const componentSet of sorted) {
     log(`Processing ComponentSet: ${componentSet.name}`);
     const variantInfo = analyzeVariantProperties(componentSet);
     if (!variantInfo) continue;
@@ -237,10 +253,25 @@ function run(): void {
     });
 
     transformLayout(variantInfo, positionMap, componentSet);
+
+    // Position each ComponentSet with spacing and align to top
+    componentSet.x = offsetX;
+    componentSet.y = 0;
+    offsetX += componentSet.width + CONFIG.gapBetweenSets;
+
     log(`📐 Final component size: ${componentSet.width} × ${componentSet.height}`);
     successCount++;
   }
 
+  // Reorder in layer panel by name (ascending)
+  const parent = sorted[0].parent;
+  if (parent) {
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      parent.insertChild(0, sorted[i]);
+    }
+  }
+
+  figma.viewport.scrollAndZoomIntoView(sorted);
   figma.notify(`✅ Done! ${successCount} ComponentSet${successCount === 1 ? '' : 's'} updated.`);
   figma.closePlugin();
 }

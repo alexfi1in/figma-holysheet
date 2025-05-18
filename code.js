@@ -4,6 +4,7 @@
 const CONFIG = {
     padding: 20,
     step: 48,
+    gapBetweenSets: 40,
     props: {
         set: "Set",
         style: "Style",
@@ -39,6 +40,14 @@ function resetConstraintsRecursively(node) {
 // Returns a unique key string from variant properties and key order
 function variantKey(properties, keys) {
     return keys.map((k) => { var _a; return (_a = properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
+}
+// Sorts variants by node name
+function sortVariantsByName(variants) {
+    variants.sort((a, b) => a.node.name.localeCompare(b.node.name));
+}
+// Sorts ComponentSets by name ascending
+function sortComponentSetsByNameAsc(sets) {
+    return sets.slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 /** ========== [ ANALYSIS ] ========== **/
 // Parses variant properties from all components inside the ComponentSet and checks for errors or duplicates
@@ -89,6 +98,7 @@ Figma will also highlight the conflict. Please ensure each variant has unique pr
         }
         seenKeys.add(key);
     }
+    sortVariantsByName(variants);
     return {
         propertyKeys: Array.from(propertyKeysSet),
         propertyValues,
@@ -178,8 +188,10 @@ function run() {
         figma.closePlugin();
         return;
     }
+    const sorted = sortComponentSetsByNameAsc(selection);
     let successCount = 0;
-    for (const componentSet of selection) {
+    let offsetX = 0;
+    for (const componentSet of sorted) {
         log(`Processing ComponentSet: ${componentSet.name}`);
         const variantInfo = analyzeVariantProperties(componentSet);
         if (!variantInfo)
@@ -192,9 +204,21 @@ function run() {
             log(`Variant: ${key} → x: ${pos === null || pos === void 0 ? void 0 : pos.x}, y: ${pos === null || pos === void 0 ? void 0 : pos.y}`);
         });
         transformLayout(variantInfo, positionMap, componentSet);
+        // Position each ComponentSet with spacing and align to top
+        componentSet.x = offsetX;
+        componentSet.y = 0;
+        offsetX += componentSet.width + CONFIG.gapBetweenSets;
         log(`📐 Final component size: ${componentSet.width} × ${componentSet.height}`);
         successCount++;
     }
+    // Reorder in layer panel by name (ascending)
+    const parent = sorted[0].parent;
+    if (parent) {
+        for (let i = sorted.length - 1; i >= 0; i--) {
+            parent.insertChild(0, sorted[i]);
+        }
+    }
+    figma.viewport.scrollAndZoomIntoView(sorted);
     figma.notify(`✅ Done! ${successCount} ComponentSet${successCount === 1 ? '' : 's'} updated.`);
     figma.closePlugin();
 }
