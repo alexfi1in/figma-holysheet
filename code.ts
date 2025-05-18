@@ -1,7 +1,18 @@
-/** ========== [ CONSTANTS ] ========== **/
-const PADDING = 20;
+/** ========== [ CONFIG ] ========== **/
+// All configurable layout values and property keys used for layout logic
+const CONFIG = {
+  padding: 20,
+  step: 48,
+  props: {
+    set: "Set",
+    style: "Style",
+    color: "Color",
+    size: "Size"
+  }
+};
 
 /** ========== [ UTILS ] ========== **/
+// Logs plugin status messages to the console and Figma UI
 function log(message: string, type: 'info' | 'error' = 'info'): void {
   if (type === 'error') {
     figma.notify(message, { error: true });
@@ -11,6 +22,7 @@ function log(message: string, type: 'info' | 'error' = 'info'): void {
   }
 }
 
+// Recursively resets constraints of a node and its children to MIN/MIN to avoid stretching issues
 function resetConstraintsRecursively(node: SceneNode): void {
   if ("constraints" in node) {
     node.constraints = {
@@ -26,6 +38,7 @@ function resetConstraintsRecursively(node: SceneNode): void {
 }
 
 /** ========== [ VALIDATION ] ========== **/
+// Ensures the current Figma selection is a single ComponentSet, otherwise returns null
 function validateSelection(): ComponentSetNode | null {
   const selection = figma.currentPage.selection;
   if (selection.length !== 1) {
@@ -53,6 +66,7 @@ type VariantInfo = {
 };
 
 /** ========== [ ANALYSIS ] ========== **/
+// Parses variant properties from all components inside the ComponentSet and checks for errors or duplicates
 function analyzeVariantProperties(componentSet: ComponentSetNode): VariantInfo | null {
   const propertyKeysSet = new Set<string>();
   const propertyValues: Record<string, Set<string>> = {};
@@ -112,13 +126,14 @@ Figma will also highlight the conflict. Please ensure each variant has unique pr
 }
 
 /** ========== [ LAYOUT LOGIC ] ========== **/
+// Generates a layout map where variants are grouped by Set (block), and positioned by Size (X) and Style+Color (Y)
 function planLayoutWithSizeOnXColorOnY(
   variantInfo: VariantInfo,
-  step = 48,
-  setProp = "Set",
-  styleProp = "Style",
-  colorProp = "Color",
-  sizeProp = "Size"
+  step = CONFIG.step,
+  setProp = CONFIG.props.set,
+  styleProp = CONFIG.props.style,
+  colorProp = CONFIG.props.color,
+  sizeProp = CONFIG.props.size
 ): Map<string, { x: number; y: number }> {
   const setGroups = new Map<string, Variant[]>();
 
@@ -150,8 +165,8 @@ function planLayoutWithSizeOnXColorOnY(
       const colorIdx = colorIndexMap.get(variant.properties[colorProp] ?? "") ?? 0;
       const sizeIdx = sizeIndexMap.get(variant.properties[sizeProp] ?? "") ?? 0;
 
-      const x = baseX + sizeIdx * step + PADDING;
-      const y = styleIdx * (globalColorKeys.length * step) + colorIdx * step + PADDING;
+      const x = baseX + sizeIdx * step + CONFIG.padding;
+      const y = styleIdx * (globalColorKeys.length * step) + colorIdx * step + CONFIG.padding;
 
       positionMap.set(key, { x, y });
     }
@@ -163,6 +178,7 @@ function planLayoutWithSizeOnXColorOnY(
 }
 
 /** ========== [ TRANSFORMATIONS ] ========== **/
+// Applies the calculated layout to each variant: resets position, applies new coordinates, reorders and resizes the ComponentSet
 function transformLayout(
   variantInfo: VariantInfo,
   positionMap: Map<string, { x: number; y: number }>,
@@ -199,15 +215,16 @@ function transformLayout(
     maxY = Math.max(maxY, child.y + child.height);
   }
   for (const child of componentSet.children) {
-    child.x -= (minX - PADDING);
-    child.y -= (minY - PADDING);
+    child.x -= (minX - CONFIG.padding);
+    child.y -= (minY - CONFIG.padding);
   }
-  const newWidth = maxX - minX + PADDING * 2;
-  const newHeight = maxY - minY + PADDING * 2;
+  const newWidth = maxX - minX + CONFIG.padding * 2;
+  const newHeight = maxY - minY + CONFIG.padding * 2;
   componentSet.resize(newWidth, newHeight);
 }
 
 /** ========== [ MAIN ] ========== **/
+// Entry point: validates selection, analyzes variants, builds layout, applies changes and closes the plugin
 function run(): void {
   const componentSet = validateSelection();
   if (!componentSet) {

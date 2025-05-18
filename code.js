@@ -1,7 +1,18 @@
 "use strict";
-/** ========== [ CONSTANTS ] ========== **/
-const PADDING = 20;
+/** ========== [ CONFIG ] ========== **/
+// All configurable layout values and property keys used for layout logic
+const CONFIG = {
+    padding: 20,
+    step: 48,
+    props: {
+        set: "Set",
+        style: "Style",
+        color: "Color",
+        size: "Size"
+    }
+};
 /** ========== [ UTILS ] ========== **/
+// Logs plugin status messages to the console and Figma UI
 function log(message, type = 'info') {
     if (type === 'error') {
         figma.notify(message, { error: true });
@@ -11,6 +22,7 @@ function log(message, type = 'info') {
         console.log('[HolySheet]', message);
     }
 }
+// Recursively resets constraints of a node and its children to MIN/MIN to avoid stretching issues
 function resetConstraintsRecursively(node) {
     if ("constraints" in node) {
         node.constraints = {
@@ -25,6 +37,7 @@ function resetConstraintsRecursively(node) {
     }
 }
 /** ========== [ VALIDATION ] ========== **/
+// Ensures the current Figma selection is a single ComponentSet, otherwise returns null
 function validateSelection() {
     const selection = figma.currentPage.selection;
     if (selection.length !== 1) {
@@ -39,6 +52,7 @@ function validateSelection() {
     return node;
 }
 /** ========== [ ANALYSIS ] ========== **/
+// Parses variant properties from all components inside the ComponentSet and checks for errors or duplicates
 function analyzeVariantProperties(componentSet) {
     var _a;
     const propertyKeysSet = new Set();
@@ -94,7 +108,8 @@ Figma will also highlight the conflict. Please ensure each variant has unique pr
     };
 }
 /** ========== [ LAYOUT LOGIC ] ========== **/
-function planLayoutWithSizeOnXColorOnY(variantInfo, step = 48, setProp = "Set", styleProp = "Style", colorProp = "Color", sizeProp = "Size") {
+// Generates a layout map where variants are grouped by Set (block), and positioned by Size (X) and Style+Color (Y)
+function planLayoutWithSizeOnXColorOnY(variantInfo, step = CONFIG.step, setProp = CONFIG.props.set, styleProp = CONFIG.props.style, colorProp = CONFIG.props.color, sizeProp = CONFIG.props.size) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const setGroups = new Map();
     for (const variant of variantInfo.variants) {
@@ -120,8 +135,8 @@ function planLayoutWithSizeOnXColorOnY(variantInfo, step = 48, setProp = "Set", 
             const styleIdx = (_f = styleIndexMap.get((_e = variant.properties[styleProp]) !== null && _e !== void 0 ? _e : "")) !== null && _f !== void 0 ? _f : 0;
             const colorIdx = (_h = colorIndexMap.get((_g = variant.properties[colorProp]) !== null && _g !== void 0 ? _g : "")) !== null && _h !== void 0 ? _h : 0;
             const sizeIdx = (_k = sizeIndexMap.get((_j = variant.properties[sizeProp]) !== null && _j !== void 0 ? _j : "")) !== null && _k !== void 0 ? _k : 0;
-            const x = baseX + sizeIdx * step + PADDING;
-            const y = styleIdx * (globalColorKeys.length * step) + colorIdx * step + PADDING;
+            const x = baseX + sizeIdx * step + CONFIG.padding;
+            const y = styleIdx * (globalColorKeys.length * step) + colorIdx * step + CONFIG.padding;
             positionMap.set(key, { x, y });
         }
         baseX += blockWidth + step;
@@ -129,6 +144,7 @@ function planLayoutWithSizeOnXColorOnY(variantInfo, step = 48, setProp = "Set", 
     return positionMap;
 }
 /** ========== [ TRANSFORMATIONS ] ========== **/
+// Applies the calculated layout to each variant: resets position, applies new coordinates, reorders and resizes the ComponentSet
 function transformLayout(variantInfo, positionMap, componentSet) {
     for (const variant of variantInfo.variants) {
         resetConstraintsRecursively(variant.node);
@@ -160,14 +176,15 @@ function transformLayout(variantInfo, positionMap, componentSet) {
         maxY = Math.max(maxY, child.y + child.height);
     }
     for (const child of componentSet.children) {
-        child.x -= (minX - PADDING);
-        child.y -= (minY - PADDING);
+        child.x -= (minX - CONFIG.padding);
+        child.y -= (minY - CONFIG.padding);
     }
-    const newWidth = maxX - minX + PADDING * 2;
-    const newHeight = maxY - minY + PADDING * 2;
+    const newWidth = maxX - minX + CONFIG.padding * 2;
+    const newHeight = maxY - minY + CONFIG.padding * 2;
     componentSet.resize(newWidth, newHeight);
 }
 /** ========== [ MAIN ] ========== **/
+// Entry point: validates selection, analyzes variants, builds layout, applies changes and closes the plugin
 function run() {
     const componentSet = validateSelection();
     if (!componentSet) {
