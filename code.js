@@ -36,6 +36,10 @@ function resetConstraintsRecursively(node) {
         }
     }
 }
+// Returns a unique key string from variant properties and key order
+function variantKey(properties, keys) {
+    return keys.map((k) => { var _a; return (_a = properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
+}
 /** ========== [ VALIDATION ] ========== **/
 // Ensures the current Figma selection is a single ComponentSet, otherwise returns null
 function validateSelection() {
@@ -88,10 +92,9 @@ function analyzeVariantProperties(componentSet) {
         figma.closePlugin();
         return null;
     }
-    // Проверка на дублирующиеся variant-свойства
     const seenKeys = new Set();
     for (const variant of variants) {
-        const key = Array.from(propertyKeysSet).map(k => { var _a; return (_a = variant.properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
+        const key = variantKey(variant.properties, Array.from(propertyKeysSet));
         if (seenKeys.has(key)) {
             log(`Some variants have duplicate property values: ${key}.
 
@@ -131,7 +134,7 @@ function planLayoutWithSizeOnXColorOnY(variantInfo, step = CONFIG.step, setProp 
     for (const setKey of sortedSetKeys) {
         const variants = setGroups.get(setKey);
         for (const variant of variants) {
-            const key = variantInfo.propertyKeys.map(k => { var _a; return (_a = variant.properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
+            const key = variantKey(variant.properties, variantInfo.propertyKeys);
             const styleIdx = (_f = styleIndexMap.get((_e = variant.properties[styleProp]) !== null && _e !== void 0 ? _e : "")) !== null && _f !== void 0 ? _f : 0;
             const colorIdx = (_h = colorIndexMap.get((_g = variant.properties[colorProp]) !== null && _g !== void 0 ? _g : "")) !== null && _h !== void 0 ? _h : 0;
             const sizeIdx = (_k = sizeIndexMap.get((_j = variant.properties[sizeProp]) !== null && _j !== void 0 ? _j : "")) !== null && _k !== void 0 ? _k : 0;
@@ -152,9 +155,7 @@ function transformLayout(variantInfo, positionMap, componentSet) {
         variant.node.y = 0;
     }
     for (const variant of variantInfo.variants) {
-        const key = variantInfo.propertyKeys
-            .map((k) => { var _a; return (_a = variant.properties[k]) !== null && _a !== void 0 ? _a : ""; })
-            .join("|");
+        const key = variantKey(variant.properties, variantInfo.propertyKeys);
         const pos = positionMap.get(key);
         if (!pos)
             continue;
@@ -198,7 +199,7 @@ function run() {
     const positionMap = planLayoutWithSizeOnXColorOnY(variantInfo);
     log(`Layout grid created with ${positionMap.size} positions.`);
     variantInfo.variants.forEach((v) => {
-        const key = variantInfo.propertyKeys.map((k) => { var _a; return (_a = v.properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
+        const key = variantKey(v.properties, variantInfo.propertyKeys);
         const pos = positionMap.get(key);
         log(`Variant: ${key} → x: ${pos === null || pos === void 0 ? void 0 : pos.x}, y: ${pos === null || pos === void 0 ? void 0 : pos.y}`);
     });

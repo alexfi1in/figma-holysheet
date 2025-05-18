@@ -37,6 +37,11 @@ function resetConstraintsRecursively(node: SceneNode): void {
   }
 }
 
+// Returns a unique key string from variant properties and key order
+function variantKey(properties: Record<string, string>, keys: string[]): string {
+  return keys.map((k) => properties[k] ?? "").join("|");
+}
+
 /** ========== [ VALIDATION ] ========== **/
 // Ensures the current Figma selection is a single ComponentSet, otherwise returns null
 function validateSelection(): ComponentSetNode | null {
@@ -104,10 +109,9 @@ function analyzeVariantProperties(componentSet: ComponentSetNode): VariantInfo |
     return null;
   }
 
-    // Проверка на дублирующиеся variant-свойства
   const seenKeys = new Set<string>();
   for (const variant of variants) {
-    const key = Array.from(propertyKeysSet).map(k => variant.properties[k] ?? "").join("|");
+    const key = variantKey(variant.properties, Array.from(propertyKeysSet));
     if (seenKeys.has(key)) {
       log(`Some variants have duplicate property values: ${key}.
 
@@ -160,7 +164,7 @@ function planLayoutWithSizeOnXColorOnY(
   for (const setKey of sortedSetKeys) {
     const variants = setGroups.get(setKey)!;
     for (const variant of variants) {
-      const key = variantInfo.propertyKeys.map(k => variant.properties[k] ?? "").join("|");
+      const key = variantKey(variant.properties, variantInfo.propertyKeys);
       const styleIdx = styleIndexMap.get(variant.properties[styleProp] ?? "") ?? 0;
       const colorIdx = colorIndexMap.get(variant.properties[colorProp] ?? "") ?? 0;
       const sizeIdx = sizeIndexMap.get(variant.properties[sizeProp] ?? "") ?? 0;
@@ -191,9 +195,7 @@ function transformLayout(
   }
 
   for (const variant of variantInfo.variants) {
-    const key = variantInfo.propertyKeys
-      .map((k) => variant.properties[k] ?? "")
-      .join("|");
+    const key = variantKey(variant.properties, variantInfo.propertyKeys);
     const pos = positionMap.get(key);
     if (!pos) continue;
     variant.node.x = pos.x;
@@ -241,7 +243,7 @@ function run(): void {
   log(`Layout grid created with ${positionMap.size} positions.`);
 
   variantInfo.variants.forEach((v) => {
-    const key = variantInfo.propertyKeys.map((k) => v.properties[k] ?? "").join("|");
+    const key = variantKey(v.properties, variantInfo.propertyKeys);
     const pos = positionMap.get(key);
     log(`Variant: ${key} → x: ${pos?.x}, y: ${pos?.y}`);
   });
@@ -254,4 +256,3 @@ function run(): void {
 }
 
 run();
-
