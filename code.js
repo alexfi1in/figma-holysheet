@@ -2,8 +2,8 @@
 /** ========== [ CONFIG ] ========== **/
 const CONFIG = {
     padding: 20,
-    step: 48,
-    gapBetweenSets: 40,
+    step: 52,
+    gapBetweenSets: 20,
     props: {
         set: "Set",
         style: "Style",
@@ -132,7 +132,8 @@ function planLayoutWithSizeOnXColorOnY(variantInfo, step = CONFIG.step, setProp 
             const colorIdx = (_h = colorIndexMap.get((_g = variant.properties[colorProp]) !== null && _g !== void 0 ? _g : "")) !== null && _h !== void 0 ? _h : 0;
             const sizeIdx = (_k = sizeIndexMap.get((_j = variant.properties[sizeProp]) !== null && _j !== void 0 ? _j : "")) !== null && _k !== void 0 ? _k : 0;
             const x = baseX + sizeIdx * step + CONFIG.padding;
-            const y = styleIdx * (globalColorKeys.length * step) + colorIdx * step + CONFIG.padding;
+            const cellTop = styleIdx * (globalColorKeys.length * step) + colorIdx * step + CONFIG.padding;
+            const y = cellTop + step / 2 - variant.node.height / 2;
             positionMap.set(key, { x, y });
         }
         baseX += blockWidth + step;
