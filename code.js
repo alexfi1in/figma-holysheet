@@ -1,7 +1,5 @@
 "use strict";
 /** ========== [ CONFIG ] ========== **/
-// Layout spacing and variant property names.
-// Designers can adjust these to customize grid behavior.
 const CONFIG = {
     padding: 20,
     step: 48,
@@ -14,7 +12,6 @@ const CONFIG = {
     }
 };
 /** ========== [ UTILS ] ========== **/
-// Shows logs in Figma: useful for debugging or user feedback.
 function log(message, type = 'info') {
     if (type === 'error') {
         figma.notify(message, { error: true });
@@ -24,7 +21,6 @@ function log(message, type = 'info') {
         console.log('[HolySheet]', message);
     }
 }
-// Resets all constraint settings inside a node (and its children) to prevent misalignment.
 function resetConstraintsRecursively(node) {
     if ("constraints" in node) {
         node.constraints = {
@@ -38,21 +34,17 @@ function resetConstraintsRecursively(node) {
         }
     }
 }
-// Creates a string key from variant properties, used for positioning and comparison.
 function variantKey(properties, keys) {
     return keys.map((k) => { var _a; return (_a = properties[k]) !== null && _a !== void 0 ? _a : ""; }).join("|");
 }
-// Sorts variant nodes alphabetically for consistent visual and layer ordering.
 function sortVariantsByName(variants) {
     variants.sort((a, b) => a.node.name.localeCompare(b.node.name));
 }
-// Sorts ComponentSet nodes alphabetically before laying them out.
 function sortComponentSetsByNameAsc(sets) {
     return sets.slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 /** ========== [ ANALYSIS ] ========== **/
-// Reads all variant definitions, ensures validity, uniqueness, and returns structure for layout.
-function analyzeVariantProperties(componentSet) {
+function readVariantProperties(componentSet) {
     var _a;
     const propertyKeysSet = new Set();
     const propertyValues = {};
@@ -87,18 +79,6 @@ function analyzeVariantProperties(componentSet) {
         figma.closePlugin();
         return null;
     }
-    const seenKeys = new Set();
-    for (const variant of variants) {
-        const key = variantKey(variant.properties, Array.from(propertyKeysSet));
-        if (seenKeys.has(key)) {
-            log(`Some variants have duplicate property values: ${key}.
-
-Figma will also highlight the conflict. Please ensure each variant has unique property values.`, 'error');
-            figma.closePlugin();
-            return null;
-        }
-        seenKeys.add(key);
-    }
     sortVariantsByName(variants);
     return {
         propertyKeys: Array.from(propertyKeysSet),
@@ -106,8 +86,25 @@ Figma will also highlight the conflict. Please ensure each variant has unique pr
         variants,
     };
 }
-/** ========== [ LAYOUT LOGIC ] ========== **/
-// Builds the X/Y position grid for variants based on Size, Style, Color, and Set.
+function validateVariantUniqueness(variantInfo) {
+    const seenKeys = new Set();
+    for (const variant of variantInfo.variants) {
+        const key = variantKey(variant.properties, variantInfo.propertyKeys);
+        if (seenKeys.has(key)) {
+            log(`Some variants have duplicate property values: ${key}.
+
+Figma will also highlight the conflict. Please ensure each variant has unique property values.`, 'error');
+            figma.closePlugin();
+            return false;
+        }
+        seenKeys.add(key);
+    }
+    return true;
+}
+/**
+ * Calculates the position of each variant in X and Y coordinates,
+ * where X is size and Y is style × color.
+ */
 function planLayoutWithSizeOnXColorOnY(variantInfo, step = CONFIG.step, setProp = CONFIG.props.set, styleProp = CONFIG.props.style, colorProp = CONFIG.props.color, sizeProp = CONFIG.props.size) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const setGroups = new Map();
@@ -142,8 +139,10 @@ function planLayoutWithSizeOnXColorOnY(variantInfo, step = CONFIG.step, setProp 
     }
     return positionMap;
 }
-/** ========== [ TRANSFORMATIONS ] ========== **/
-// Moves variants to calculated positions, reorders them in layers, and resizes the ComponentSet to fit content.
+/**
+ * Moves component variants to the calculated coordinates.
+ * Reorders them in the layer stack and resizes the ComponentSet.
+ */
 function transformLayout(variantInfo, positionMap, componentSet) {
     for (const variant of variantInfo.variants) {
         resetConstraintsRecursively(variant.node);
@@ -181,7 +180,6 @@ function transformLayout(variantInfo, positionMap, componentSet) {
     componentSet.resize(newWidth, newHeight);
 }
 /** ========== [ MAIN ] ========== **/
-// Main logic: detects selection or page-wide ComponentSets, arranges them, and zooms to result.
 function run() {
     let selected = figma.currentPage.selection.filter((n) => n.type === 'COMPONENT_SET');
     if (selected.length === 0) {
@@ -197,8 +195,10 @@ function run() {
     let offsetX = 0;
     for (const componentSet of sorted) {
         log(`Processing ComponentSet: ${componentSet.name}`);
-        const variantInfo = analyzeVariantProperties(componentSet);
+        const variantInfo = readVariantProperties(componentSet);
         if (!variantInfo)
+            continue;
+        if (!validateVariantUniqueness(variantInfo))
             continue;
         const positionMap = planLayoutWithSizeOnXColorOnY(variantInfo);
         log(`Layout grid created with ${positionMap.size} positions.`);
