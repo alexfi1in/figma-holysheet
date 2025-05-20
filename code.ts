@@ -147,7 +147,7 @@ function planLayoutWithSizeOnXColorOnY(
 
   const globalStyleKeys = Array.from(variantInfo.propertyValues[styleProp] ?? []).sort();
   const globalColorKeys = Array.from(variantInfo.propertyValues[colorProp] ?? []).sort();
-  const globalSizeKeys = Array.from(variantInfo.propertyValues[sizeProp] ?? []).sort((a, b) => Number(a) - Number(b));
+  const globalSizeKeys = Array.from(variantInfo.propertyValues[sizeProp] ?? []).sort((a, b) => Number(b) - Number(a));
 
   const styleIndexMap = new Map(globalStyleKeys.map((k, i) => [k, i]));
   const colorIndexMap = new Map(globalColorKeys.map((k, i) => [k, i]));
@@ -155,7 +155,8 @@ function planLayoutWithSizeOnXColorOnY(
 
   const blockWidth = globalSizeKeys.length * step;
 
-  const sortedSetKeys = Array.from(setGroups.keys()).sort();
+  const sortedSetKeys = Array.from(setGroups.keys()).sort().reverse();
+
   for (const setKey of sortedSetKeys) {
     const variants = setGroups.get(setKey)!;
     for (const variant of variants) {
@@ -224,23 +225,26 @@ function transformLayout(
 
 /** ========== [ MAIN ] ========== **/
 function run(): void {
-  let selected = figma.currentPage.selection.filter((n) => n.type === 'COMPONENT_SET') as ComponentSetNode[];
-  if (selected.length === 0) {
-    selected = figma.currentPage.findAll((n) => n.type === 'COMPONENT_SET') as ComponentSetNode[];
-  }
+  const allComponentSets = figma.currentPage.findAll(n => n.type === 'COMPONENT_SET') as ComponentSetNode[];
+  const selectedSets = figma.currentPage.selection.filter(n => n.type === 'COMPONENT_SET') as ComponentSetNode[];
 
-  if (selected.length === 0) {
-    log('No ComponentSets found to process.', 'error');
+  if (allComponentSets.length === 0) {
+    log('No ComponentSets found on the page.', 'error');
     figma.closePlugin();
     return;
   }
 
-  const sorted = sortComponentSetsByNameAsc(selected);
+  const isAutoMode = selectedSets.length === 0;
+  const setsToProcess = isAutoMode ? allComponentSets : selectedSets;
+  const sorted = sortComponentSetsByNameAsc(setsToProcess);
+
   let successCount = 0;
   let offsetX = 0;
 
-  for (const componentSet of sorted) {
+  for (let i = 0; i < sorted.length; i++) {
+    const componentSet = sorted[i];
     log(`Processing ComponentSet: ${componentSet.name}`);
+
     const variantInfo = readVariantProperties(componentSet);
     if (!variantInfo) continue;
     if (!validateVariantUniqueness(variantInfo)) continue;
@@ -256,16 +260,18 @@ function run(): void {
 
     transformLayout(variantInfo, positionMap, componentSet);
 
-    componentSet.x = offsetX;
-    componentSet.y = 0;
-    offsetX += componentSet.width + CONFIG.gapBetweenSets;
+    if (isAutoMode) {
+      componentSet.x = offsetX;
+      componentSet.y = 0;
+      offsetX += componentSet.width + CONFIG.gapBetweenSets;
+    }
 
     log(`📐 Final component size: ${componentSet.width} × ${componentSet.height}`);
     successCount++;
   }
 
-  const parent = sorted[0].parent;
-  if (parent) {
+  if (isAutoMode && sorted[0].parent) {
+    const parent = sorted[0].parent;
     for (let i = sorted.length - 1; i >= 0; i--) {
       parent.insertChild(0, sorted[i]);
     }

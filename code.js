@@ -118,12 +118,12 @@ function planLayoutWithSizeOnXColorOnY(variantInfo, step = CONFIG.step, setProp 
     let baseX = 0;
     const globalStyleKeys = Array.from((_b = variantInfo.propertyValues[styleProp]) !== null && _b !== void 0 ? _b : []).sort();
     const globalColorKeys = Array.from((_c = variantInfo.propertyValues[colorProp]) !== null && _c !== void 0 ? _c : []).sort();
-    const globalSizeKeys = Array.from((_d = variantInfo.propertyValues[sizeProp]) !== null && _d !== void 0 ? _d : []).sort((a, b) => Number(a) - Number(b));
+    const globalSizeKeys = Array.from((_d = variantInfo.propertyValues[sizeProp]) !== null && _d !== void 0 ? _d : []).sort((a, b) => Number(b) - Number(a));
     const styleIndexMap = new Map(globalStyleKeys.map((k, i) => [k, i]));
     const colorIndexMap = new Map(globalColorKeys.map((k, i) => [k, i]));
     const sizeIndexMap = new Map(globalSizeKeys.map((k, i) => [k, i]));
     const blockWidth = globalSizeKeys.length * step;
-    const sortedSetKeys = Array.from(setGroups.keys()).sort();
+    const sortedSetKeys = Array.from(setGroups.keys()).sort().reverse();
     for (const setKey of sortedSetKeys) {
         const variants = setGroups.get(setKey);
         for (const variant of variants) {
@@ -181,19 +181,20 @@ function transformLayout(variantInfo, positionMap, componentSet) {
 }
 /** ========== [ MAIN ] ========== **/
 function run() {
-    let selected = figma.currentPage.selection.filter((n) => n.type === 'COMPONENT_SET');
-    if (selected.length === 0) {
-        selected = figma.currentPage.findAll((n) => n.type === 'COMPONENT_SET');
-    }
-    if (selected.length === 0) {
-        log('No ComponentSets found to process.', 'error');
+    const allComponentSets = figma.currentPage.findAll(n => n.type === 'COMPONENT_SET');
+    const selectedSets = figma.currentPage.selection.filter(n => n.type === 'COMPONENT_SET');
+    if (allComponentSets.length === 0) {
+        log('No ComponentSets found on the page.', 'error');
         figma.closePlugin();
         return;
     }
-    const sorted = sortComponentSetsByNameAsc(selected);
+    const isAutoMode = selectedSets.length === 0;
+    const setsToProcess = isAutoMode ? allComponentSets : selectedSets;
+    const sorted = sortComponentSetsByNameAsc(setsToProcess);
     let successCount = 0;
     let offsetX = 0;
-    for (const componentSet of sorted) {
+    for (let i = 0; i < sorted.length; i++) {
+        const componentSet = sorted[i];
         log(`Processing ComponentSet: ${componentSet.name}`);
         const variantInfo = readVariantProperties(componentSet);
         if (!variantInfo)
@@ -208,14 +209,16 @@ function run() {
             log(`Variant: ${key} → x: ${pos === null || pos === void 0 ? void 0 : pos.x}, y: ${pos === null || pos === void 0 ? void 0 : pos.y}`);
         });
         transformLayout(variantInfo, positionMap, componentSet);
-        componentSet.x = offsetX;
-        componentSet.y = 0;
-        offsetX += componentSet.width + CONFIG.gapBetweenSets;
+        if (isAutoMode) {
+            componentSet.x = offsetX;
+            componentSet.y = 0;
+            offsetX += componentSet.width + CONFIG.gapBetweenSets;
+        }
         log(`📐 Final component size: ${componentSet.width} × ${componentSet.height}`);
         successCount++;
     }
-    const parent = sorted[0].parent;
-    if (parent) {
+    if (isAutoMode && sorted[0].parent) {
+        const parent = sorted[0].parent;
         for (let i = sorted.length - 1; i >= 0; i--) {
             parent.insertChild(0, sorted[i]);
         }
