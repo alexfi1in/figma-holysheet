@@ -1,278 +1,201 @@
 /** =============================================
  *  HolySheet — ComponentSet Auto‑Layout Plugin
- *  Author: Your Name
- *  Description: Arranges variants in a predictable
- *  Size (X) × Style×Color (Y) grid with optional
- *  Set‑by‑Set blocks. Implements deterministic keys
- *  by alphabetically sorting propertyKeys.
+ *  Modular (IIFE) refactor: Logger, Inspector, Layout
  *  ============================================= */
 
 /** ========== [ CONFIG ] ========== **/
 const CONFIG = {
-  padding: 20,          // inner padding around grid
-  step: 52,             // cell size (width/height)
-  gapBetweenSets: 20,   // gap between Set blocks on X
-  props: {
-    set: "Set",
-    style: "Style",
-    color: "Color",
-    size: "Size"
-  }
+  padding: 20,
+  step: 52,
+  gapBetweenSets: 20,
+  props: { set: "Set", style: "Style", color: "Color", size: "Size" }
 } as const;
 
-/** ========== [ UTILS ] ========== **/
-function log(message: string, type: 'info' | 'error' = 'info'): void {
-  if (type === 'error') {
-    figma.notify(message, { error: true });
-    console.error('[HolySheet]', message);
-  } else {
-    console.log('[HolySheet]', message);
+/** ========== [ LOGGER ] ========== **/
+const Logger = (() => {
+  type Level = "debug" | "info" | "error";
+  const priority = { debug: 0, info: 1, error: 2 } as const;
+  let current: Level = "info";
+  function setLevel(l: Level) { current = l; }
+  function log(msg: string, l: Level = "info") {
+    if (priority[l] < priority[current]) return;
+    if (l === "error") {
+      figma.notify(msg, { error: true });
+      console.error("[HolySheet]", msg);
+    } else {
+      console.log("[HolySheet]", msg);
+    }
   }
-}
-
-function resetConstraintsRecursively(node: SceneNode): void {
-  if ("constraints" in node) {
-    node.constraints = { horizontal: "MIN", vertical: "MIN" };
-  }
-  if ("children" in node) {
-    for (const child of node.children) resetConstraintsRecursively(child);
-  }
-}
-
-function variantKey(properties: Record<string, string>, keys: string[]): string {
-  return keys.map(k => properties[k] ?? "").join("|");
-}
-
-function sortVariantsByName(variants: Variant[]): void {
-  variants.sort((a, b) => a.node.name.localeCompare(b.node.name));
-}
-
-function sortComponentSetsByNameAsc(sets: ComponentSetNode[]): ComponentSetNode[] {
-  return sets.slice().sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function sortColorKeysWithLetterPriority(keys: string[]): string[] {
-  return keys.sort((a, b) => {
-    const priority = (k: string) => {
-      const first = k[0]?.toLowerCase();
-      if (first === 'n') return 0;   // neutrals first
-      if (first === 's') return 1;   // semantic second
-      return 2;                      // others
-    };
-    const pa = priority(a);
-    const pb = priority(b);
-    return pa === pb ? a.localeCompare(b) : pa - pb;
-  });
-}
+  return { log, setLevel };
+})();
 
 /** ========== [ TYPES ] ========== **/
 type Variant = { node: ComponentNode; properties: Record<string, string> };
-
-type VariantInfo = {
+interface VariantInfo {
   propertyKeys: string[];
   propertyValues: Record<string, Set<string>>;
   variants: Variant[];
-};
+}
 
-/** ========== [ ANALYSIS ] ========== **/
-function readVariantProperties(componentSet: ComponentSetNode): VariantInfo | null {
-  const propertyKeysSet = new Set<string>();
-  const propertyValues: Record<string, Set<string>> = {};
-  const variants: Variant[] = [];
+/** ========== [ INSPECTOR ] ========== **/
+const Inspector = (() => {
+  function variantKey(props: Record<string, string>, keys: string[]): string {
+    return keys.map(k => props[k] ?? "").join("|");
+  }
 
-  for (const child of componentSet.children) {
-    if (child.type !== 'COMPONENT') continue;
+  function sortByName(items: Variant[]) {
+    items.sort((a, b) => a.node.name.localeCompare(b.node.name));
+  }
 
-    let properties: Record<string, string>;
-    try {
-      properties = child.variantProperties ?? {};
-    } catch {
-      log('Failed to read variant properties. They may be broken or conflicting.', 'error');
+  function readVariantProperties(set: ComponentSetNode): VariantInfo | null {
+    const keySet = new Set<string>();
+    const valMap: Record<string, Set<string>> = {};
+    const variants: Variant[] = [];
+
+    for (const child of set.children) {
+      if (child.type !== "COMPONENT") continue;
+      const props = child.variantProperties ?? {};
+      variants.push({ node: child, properties: props });
+      for (const [k, v] of Object.entries(props)) {
+        keySet.add(k);
+        if (!valMap[k]) valMap[k] = new Set<string>();
+        valMap[k].add(v);
+      }
+    }
+
+    if (!variants.length) {
+      Logger.log("No variants in ComponentSet.", "error");
       figma.closePlugin();
       return null;
     }
 
-    variants.push({ node: child, properties });
+    sortByName(variants);
+    return { propertyKeys: Array.from(keySet).sort(), propertyValues: valMap, variants };
+  }
 
-    for (const [key, value] of Object.entries(properties)) {
-      propertyKeysSet.add(key);
-      if (!propertyValues[key]) propertyValues[key] = new Set();
-      propertyValues[key].add(value);
+  function validate(info: VariantInfo): boolean {
+    const seen = new Set<string>();
+    for (const v of info.variants) {
+      const key = variantKey(v.properties, info.propertyKeys);
+      if (seen.has(key)) {
+        Logger.log(`Duplicate variant properties: ${key}`, "error");
+        figma.closePlugin();
+        return false;
+      }
+      seen.add(key);
     }
+    return true;
   }
 
-  if (!variants.length) {
-    log('No variants found in the ComponentSet.', 'error');
-    figma.closePlugin();
-    return null;
-  }
-  if (!propertyKeysSet.size) {
-    log('No variant properties detected in the ComponentSet.', 'error');
-    figma.closePlugin();
-    return null;
+  function resetConstraints(node: SceneNode) {
+    if ("constraints" in node) node.constraints = { horizontal: "MIN", vertical: "MIN" };
+    if ("children" in node) node.children.forEach(resetConstraints);
   }
 
-  sortVariantsByName(variants);
-
-  return {
-    propertyKeys: Array.from(propertyKeysSet).sort(), // ★ deterministic order
-    propertyValues,
-    variants
-  };
-}
-
-function validateVariantUniqueness(variantInfo: VariantInfo): boolean {
-  const seen = new Set<string>();
-  for (const variant of variantInfo.variants) {
-    const key = variantKey(variant.properties, variantInfo.propertyKeys);
-    if (seen.has(key)) {
-      log(`Duplicate variant properties detected: ${key}.`, 'error');
-      figma.closePlugin();
-      return false;
-    }
-    seen.add(key);
-  }
-  return true;
-}
+  return { variantKey, readVariantProperties, validate, resetConstraints };
+})();
 
 /** ========== [ LAYOUT ] ========== **/
-function planLayoutWithSizeOnXColorOnY(
-  variantInfo: VariantInfo,
-  step = CONFIG.step,
-  setProp = CONFIG.props.set,
-  styleProp = CONFIG.props.style,
-  colorProp = CONFIG.props.color,
-  sizeProp = CONFIG.props.size
-): Map<string, { x: number; y: number }> {
-  // group by Set
-  const setGroups = new Map<string, Variant[]>();
-  for (const variant of variantInfo.variants) {
-    const setVal = variant.properties[setProp] ?? 'default';
-    if (!setGroups.has(setVal)) setGroups.set(setVal, []);
-    setGroups.get(setVal)!.push(variant);
+const LayoutService = (() => {
+  function sortColorKeys(keys: string[]): string[] {
+    return keys.sort((a, b) => {
+      const p = (c: string) => (c[0]?.toLowerCase() === "n" ? 0 : c[0]?.toLowerCase() === "s" ? 1 : 2);
+      const pa = p(a), pb = p(b);
+      return pa === pb ? a.localeCompare(b) : pa - pb;
+    });
   }
 
-  // global ordered keys
-  const styles = Array.from(variantInfo.propertyValues[styleProp] ?? []).sort().reverse();
-  const colors = sortColorKeysWithLetterPriority(Array.from(variantInfo.propertyValues[colorProp] ?? []));
-  const sizes  = Array.from(variantInfo.propertyValues[sizeProp] ?? []).sort((a, b) => Number(a) - Number(b));
+  function plan(info: VariantInfo): Map<string, { x: number; y: number }> {
+    const { step, padding, props } = CONFIG;
+    const { set: setProp, style: styleProp, color: colorProp, size: sizeProp } = props;
 
-  log(`[Sort] Style: ${styles}`);
-  log(`[Sort] Color: ${colors}`);
-  log(`[Sort] Size: ${sizes}`);
-
-  const idx = <T extends string>(arr: T[]) => new Map(arr.map((k, i) => [k, i] as const));
-  const styleIdx = idx(styles);
-  const colorIdx = idx(colors);
-  const sizeIdx  = idx(sizes);
-
-  const blockWidth = sizes.length * step;
-  let baseX = 0;
-  const positionMap = new Map<string, { x: number; y: number }>();
-
-  const sortedSetKeys = Array.from(setGroups.keys()).sort().reverse();
-  for (const setKey of sortedSetKeys) {
-    for (const variant of setGroups.get(setKey)!) {
-      const key = variantKey(variant.properties, variantInfo.propertyKeys);
-      const sx = sizeIdx.get(variant.properties[sizeProp] ?? '') ?? 0;
-      const sy = styleIdx.get(variant.properties[styleProp] ?? '') ?? 0;
-      const cy = colorIdx.get(variant.properties[colorProp] ?? '') ?? 0;
-
-      const x = baseX + sx * step + CONFIG.padding;
-      const yCellTop = sy * (colors.length * step) + cy * step + CONFIG.padding;
-      const y = yCellTop + step / 2 - variant.node.height / 2;
-
-      positionMap.set(key, { x, y });
+    // group variants by Set
+    const setGroups = new Map<string, Variant[]>();
+    for (const v of info.variants) {
+      const key = v.properties[setProp] ?? "default";
+      let arr = setGroups.get(key);
+      if (!arr) {
+        arr = [];
+        setGroups.set(key, arr);
+      }
+      arr.push(v);
     }
-    baseX += blockWidth + step; // move to next Set block
+
+    const styles = Array.from(info.propertyValues[styleProp] ?? []).sort().reverse();
+    const colors = sortColorKeys(Array.from(info.propertyValues[colorProp] ?? []));
+    const sizes  = Array.from(info.propertyValues[sizeProp] ?? []).sort((a, b) => Number(a) - Number(b));
+
+    const idx = (arr: string[]) => new Map(arr.map((v, i) => [v, i] as const));
+    const iStyle = idx(styles), iColor = idx(colors), iSize = idx(sizes);
+
+    const pos = new Map<string, { x: number; y: number }>();
+    let baseX = 0;
+    const blockW = sizes.length * step;
+
+    for (const setKey of Array.from(setGroups.keys()).sort().reverse()) {
+      for (const v of setGroups.get(setKey)!) {
+        const sx = iSize.get(v.properties[sizeProp] ?? "") ?? 0;
+        const sy = iStyle.get(v.properties[styleProp] ?? "") ?? 0;
+        const cy = iColor.get(v.properties[colorProp] ?? "") ?? 0;
+        const x = baseX + sx * step + padding;
+        const cellTop = sy * (colors.length * step) + cy * step + padding;
+        const y = cellTop + step / 2 - v.node.height / 2;
+        pos.set(Inspector.variantKey(v.properties, info.propertyKeys), { x, y });
+      }
+      baseX += blockW + step;
+    }
+    return pos;
   }
 
-  return positionMap;
-}
+  function apply(info: VariantInfo, map: Map<string, { x: number; y: number }>, setNode: ComponentSetNode) {
+    info.variants.forEach(v => { Inspector.resetConstraints(v.node); v.node.x = v.node.y = 0; });
+    info.variants.forEach(v => {
+      const p = map.get(Inspector.variantKey(v.properties, info.propertyKeys));
+      if (p) { v.node.x = p.x; v.node.y = p.y; }
+    });
 
-/** ========== [ APPLY ] ========== **/
-function transformLayout(
-  info: VariantInfo,
-  posMap: Map<string, { x: number; y: number }>,
-  setNode: ComponentSetNode
-): void {
-  // zero‑out before repositioning (keeps diff cleaner)
-  for (const v of info.variants) {
-    resetConstraintsRecursively(v.node);
-    v.node.x = v.node.y = 0;
-  }
-  // apply positions
-  for (const v of info.variants) {
-    const key = variantKey(v.properties, info.propertyKeys);
-    const p = posMap.get(key);
-    if (!p) continue;
-    v.node.x = p.x;
-    v.node.y = p.y;
-  }
-  // re‑order children visually (top‑to‑bottom, left‑to‑right)
-  const ordered = setNode.children.slice().sort((a, b) => (a.y === b.y ? a.x - b.x : a.y - b.y));
-  ordered.forEach((n, i) => setNode.insertChild(i, n));
+    const ordered = setNode.children.slice().sort((a, b) => (a.y === b.y ? a.x - b.x : a.y - b.y));
+    ordered.forEach((n, i) => setNode.insertChild(i, n));
 
-  // resize ComponentSet frame to fit
-  if (!setNode.children.length) return;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const c of setNode.children) {
-    minX = Math.min(minX, c.x);
-    minY = Math.min(minY, c.y);
-    maxX = Math.max(maxX, c.x + c.width);
-    maxY = Math.max(maxY, c.y + c.height);
+    if (!setNode.children.length) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    setNode.children.forEach(c => {
+      minX = Math.min(minX, c.x); minY = Math.min(minY, c.y);
+      maxX = Math.max(maxX, c.x + c.width); maxY = Math.max(maxY, c.y + c.height);
+    });
+    setNode.children.forEach(c => { c.x -= (minX - CONFIG.padding); c.y -= (minY - CONFIG.padding); });
+    setNode.resize(maxX - minX + CONFIG.padding * 2, maxY - minY + CONFIG.padding * 2);
   }
-  setNode.children.forEach(c => {
-    c.x -= (minX - CONFIG.padding);
-    c.y -= (minY - CONFIG.padding);
-  });
-  setNode.resize(maxX - minX + CONFIG.padding * 2, maxY - minY + CONFIG.padding * 2);
-}
+
+  return { plan, apply };
+})();
 
 /** ========== [ MAIN ] ========== **/
-function run(): void {
-  const allSets = figma.currentPage.findAll(n => n.type === 'COMPONENT_SET') as ComponentSetNode[];
-  if (!allSets.length) {
-    log('No ComponentSets found on the page.', 'error');
-    figma.closePlugin();
-    return;
-  }
+(function run() {
+  const allSets = figma.currentPage.findAll(n => n.type === "COMPONENT_SET") as ComponentSetNode[];
+  if (!allSets.length) { Logger.log("No ComponentSets on page.", "error"); figma.closePlugin(); return; }
 
-  const selectedSets = figma.currentPage.selection.filter(n => n.type === 'COMPONENT_SET') as ComponentSetNode[];
-  const autoMode = !selectedSets.length;
-  const sets = sortComponentSetsByNameAsc(autoMode ? allSets : selectedSets);
+  const selected = figma.currentPage.selection.filter(n => n.type === "COMPONENT_SET") as ComponentSetNode[];
+  const auto = !selected.length;
+  const sets = [...(auto ? allSets : selected)].sort((a, b) => a.name.localeCompare(b.name));
 
-  let processed = 0;
-  let offsetX = 0; // for auto‑mode block arrangement
-
+  let processed = 0, offsetX = 0;
   for (const setNode of sets) {
-    log(`Processing ComponentSet: ${setNode.name}`);
-
-    const variantInfo = readVariantProperties(setNode);
-    if (!variantInfo) continue;
-    if (!validateVariantUniqueness(variantInfo)) continue;
-
-    const posMap = planLayoutWithSizeOnXColorOnY(variantInfo);
-    transformLayout(variantInfo, posMap, setNode);
-
-    if (autoMode) {
-      setNode.x = offsetX;
-      setNode.y = 0;
-      offsetX += setNode.width + CONFIG.gapBetweenSets;
-    }
-
-    processed++;
-    log(`📐 Final component size: ${setNode.width}×${setNode.height}`);
+    Logger.log(`Processing: ${setNode.name}`);
+    const info = Inspector.readVariantProperties(setNode);
+    if (!info || !Inspector.validate(info)) continue;
+    const positions = LayoutService.plan(info);
+    LayoutService.apply(info, positions, setNode);
+    if (auto) { setNode.x = offsetX; setNode.y = 0; offsetX += setNode.width + CONFIG.gapBetweenSets; }
+    processed++; Logger.log(`📐 Size: ${setNode.width}×${setNode.height}`);
   }
 
-  if (autoMode && sets[0]?.parent) {
+  if (auto && sets[0]?.parent) {
     const parent = sets[0].parent!;
     for (let i = sets.length - 1; i >= 0; i--) parent.insertChild(0, sets[i]);
   }
 
   figma.viewport.scrollAndZoomIntoView(sets);
-  figma.notify(`✅ Done! ${processed} ComponentSet${processed === 1 ? '' : 's'} updated.`);
+  figma.notify(`✅ Done! ${processed} ComponentSet${processed === 1 ? "" : "s"} updated.`);
   figma.closePlugin();
-}
-
-run();
+})();
