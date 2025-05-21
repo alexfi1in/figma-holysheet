@@ -47,6 +47,20 @@ function sortComponentSetsByNameAsc(sets: ComponentSetNode[]): ComponentSetNode[
   return sets.slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function sortColorKeysWithLetterPriority(keys: string[]): string[] {
+  return keys.sort((a, b) => {
+    const getPriority = (key: string) => {
+      const first = key[0]?.toLowerCase();
+      if (first === 'n') return 0;
+      if (first === 's') return 1;
+      return 2;
+    };
+    const pa = getPriority(a);
+    const pb = getPriority(b);
+    return pa === pb ? a.localeCompare(b) : pa - pb;
+  });
+}
+
 /** ========== [ TYPES ] ========== **/
 type Variant = {
   node: ComponentNode;
@@ -145,16 +159,19 @@ function planLayoutWithSizeOnXColorOnY(
   const positionMap = new Map<string, { x: number; y: number }>();
   let baseX = 0;
 
-  const globalStyleKeys = Array.from(variantInfo.propertyValues[styleProp] ?? []).sort();
-  const globalColorKeys = Array.from(variantInfo.propertyValues[colorProp] ?? []).sort();
-  const globalSizeKeys = Array.from(variantInfo.propertyValues[sizeProp] ?? []).sort((a, b) => Number(b) - Number(a));
+  const globalStyleKeys = Array.from(variantInfo.propertyValues[styleProp] ?? []).sort().reverse();
+  const globalColorKeys = sortColorKeysWithLetterPriority(Array.from(variantInfo.propertyValues[colorProp] ?? []));
+  const globalSizeKeys = Array.from(variantInfo.propertyValues[sizeProp] ?? []).sort((a, b) => Number(a) - Number(b));
+
+  log(`[Sort] Style: ${globalStyleKeys.join(', ')}`);
+  log(`[Sort] Color: ${globalColorKeys.join(', ')}`);
+  log(`[Sort] Size: ${globalSizeKeys.join(', ')}`);
 
   const styleIndexMap = new Map(globalStyleKeys.map((k, i) => [k, i]));
   const colorIndexMap = new Map(globalColorKeys.map((k, i) => [k, i]));
   const sizeIndexMap = new Map(globalSizeKeys.map((k, i) => [k, i]));
 
   const blockWidth = globalSizeKeys.length * step;
-
   const sortedSetKeys = Array.from(setGroups.keys()).sort().reverse();
 
   for (const setKey of sortedSetKeys) {
@@ -178,10 +195,7 @@ function planLayoutWithSizeOnXColorOnY(
   return positionMap;
 }
 
-/**
- * Moves component variants to the calculated coordinates.
- * Reorders them in the layer stack and resizes the ComponentSet.
- */
+/** ========== [ APPLY ] ========== **/
 function transformLayout(
   variantInfo: VariantInfo,
   positionMap: Map<string, { x: number; y: number }>,
@@ -219,6 +233,7 @@ function transformLayout(
     child.x -= (minX - CONFIG.padding);
     child.y -= (minY - CONFIG.padding);
   }
+
   const newWidth = maxX - minX + CONFIG.padding * 2;
   const newHeight = maxY - minY + CONFIG.padding * 2;
   componentSet.resize(newWidth, newHeight);

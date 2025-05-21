@@ -43,6 +43,22 @@ function sortVariantsByName(variants) {
 function sortComponentSetsByNameAsc(sets) {
     return sets.slice().sort((a, b) => a.name.localeCompare(b.name));
 }
+function sortColorKeysWithLetterPriority(keys) {
+    return keys.sort((a, b) => {
+        const getPriority = (key) => {
+            var _a;
+            const first = (_a = key[0]) === null || _a === void 0 ? void 0 : _a.toLowerCase();
+            if (first === 'n')
+                return 0;
+            if (first === 's')
+                return 1;
+            return 2;
+        };
+        const pa = getPriority(a);
+        const pb = getPriority(b);
+        return pa === pb ? a.localeCompare(b) : pa - pb;
+    });
+}
 /** ========== [ ANALYSIS ] ========== **/
 function readVariantProperties(componentSet) {
     var _a;
@@ -116,9 +132,12 @@ function planLayoutWithSizeOnXColorOnY(variantInfo, step = CONFIG.step, setProp 
     }
     const positionMap = new Map();
     let baseX = 0;
-    const globalStyleKeys = Array.from((_b = variantInfo.propertyValues[styleProp]) !== null && _b !== void 0 ? _b : []).sort();
-    const globalColorKeys = Array.from((_c = variantInfo.propertyValues[colorProp]) !== null && _c !== void 0 ? _c : []).sort();
-    const globalSizeKeys = Array.from((_d = variantInfo.propertyValues[sizeProp]) !== null && _d !== void 0 ? _d : []).sort((a, b) => Number(b) - Number(a));
+    const globalStyleKeys = Array.from((_b = variantInfo.propertyValues[styleProp]) !== null && _b !== void 0 ? _b : []).sort().reverse();
+    const globalColorKeys = sortColorKeysWithLetterPriority(Array.from((_c = variantInfo.propertyValues[colorProp]) !== null && _c !== void 0 ? _c : []));
+    const globalSizeKeys = Array.from((_d = variantInfo.propertyValues[sizeProp]) !== null && _d !== void 0 ? _d : []).sort((a, b) => Number(a) - Number(b));
+    log(`[Sort] Style: ${globalStyleKeys.join(', ')}`);
+    log(`[Sort] Color: ${globalColorKeys.join(', ')}`);
+    log(`[Sort] Size: ${globalSizeKeys.join(', ')}`);
     const styleIndexMap = new Map(globalStyleKeys.map((k, i) => [k, i]));
     const colorIndexMap = new Map(globalColorKeys.map((k, i) => [k, i]));
     const sizeIndexMap = new Map(globalSizeKeys.map((k, i) => [k, i]));
@@ -140,10 +159,7 @@ function planLayoutWithSizeOnXColorOnY(variantInfo, step = CONFIG.step, setProp 
     }
     return positionMap;
 }
-/**
- * Moves component variants to the calculated coordinates.
- * Reorders them in the layer stack and resizes the ComponentSet.
- */
+/** ========== [ APPLY ] ========== **/
 function transformLayout(variantInfo, positionMap, componentSet) {
     for (const variant of variantInfo.variants) {
         resetConstraintsRecursively(variant.node);
