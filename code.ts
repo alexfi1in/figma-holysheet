@@ -1,7 +1,9 @@
+/// <reference types="@figma/plugin-typings" />
 /** =============================================
  *  HolySheet — ComponentSet Auto‑Layout Plugin
  *  Modular (IIFE) refactor: Logger, Inspector, Layout
  *  ============================================= */
+
 
 /** ========== [ CONFIG ] ========== **/
 const CONFIG = {
@@ -20,7 +22,7 @@ const Logger = (() => {
   function log(msg: string, l: Level = "info") {
     if (priority[l] < priority[current]) return;
     if (l === "error") {
-      figma.notify(msg, { error: true });
+      figma.notify(msg, { error: true, timeout: 5000 });
       console.error("[HolySheet]", msg);
     } else {
       console.log("[HolySheet]", msg);
@@ -92,7 +94,48 @@ const Inspector = (() => {
     if ("children" in node) node.children.forEach(resetConstraints);
   }
 
-  return { variantKey, readVariantProperties, validate, resetConstraints };
+  function hasNonZeroRotation(node: SceneNode): boolean {
+    if (!("rotation" in node)) return false;
+    const r = (node as unknown as { rotation: number }).rotation;
+    const normalized = ((r % 360) + 360) % 360;
+    return Math.abs(normalized) > 0.001;
+  }
+
+  function collectRotationIssues(set: ComponentSetNode): string[] {
+    const issues: string[] = [];
+
+    function walk(n: SceneNode, pushIssue: () => void) {
+      if (hasNonZeroRotation(n)) pushIssue();
+      if ("children" in n) n.children.forEach(c => walk(c as SceneNode, pushIssue));
+    }
+
+    for (const child of set.children) {
+      if (child.type !== "COMPONENT") continue;
+      let flagged = false;
+      const push = () => { if (!flagged) { issues.push(`${set.name} / ${child.name}`); flagged = true; } };
+      walk(child, push);
+    }
+    return issues;
+  }
+
+  function collectRotationIssuesGrouped(set: ComponentSetNode): { set: string; variants: string[] } | null {
+    const variants: string[] = [];
+
+    function hasIssue(n: SceneNode): boolean {
+      if (hasNonZeroRotation(n)) return true;
+      if ("children" in n) return n.children.some(c => hasIssue(c as SceneNode));
+      return false;
+    }
+
+    for (const child of set.children) {
+      if (child.type !== "COMPONENT") continue;
+      if (hasIssue(child as unknown as SceneNode)) variants.push(child.name);
+    }
+
+    return variants.length ? { set: set.name, variants } : null;
+  }
+
+  return { variantKey, readVariantProperties, validate, resetConstraints, collectRotationIssues, collectRotationIssuesGrouped };
 })();
 
 /** ========== [ LAYOUT ] ========== **/
@@ -171,13 +214,84 @@ const LayoutService = (() => {
 })();
 
 /** ========== [ MAIN ] ========== **/
-(function run() {
+(async function run() {
   const allSets = figma.currentPage.findAll(n => n.type === "COMPONENT_SET") as ComponentSetNode[];
   if (!allSets.length) { Logger.log("No ComponentSets on page.", "error"); figma.closePlugin(); return; }
 
   const selected = figma.currentPage.selection.filter(n => n.type === "COMPONENT_SET") as ComponentSetNode[];
   const auto = !selected.length;
   const sets = [...(auto ? allSets : selected)].sort((a, b) => a.name.localeCompare(b.name));
+
+  const groupedIssues: { set: string; variants: string[] }[] = [];
+  for (const setNode of sets) {
+    const group = Inspector.collectRotationIssuesGrouped(setNode);
+    if (group) groupedIssues.push(group);
+  }
+
+  if (groupedIssues.length) {
+    // Show toast immediately to guarantee user feedback even if text creation fails
+    Logger.log("Found nodes with Rotation ≠ 0. See generated report.", "error");
+    try {
+      await figma.loadFontAsync({ family: "Inter", style: "Regular" });
+      await figma.loadFontAsync({ family: "Inter", style: "Bold" });
+      const text = figma.createText();
+      try { text.fontName = { family: "Inter", style: "Regular" }; } catch {}
+
+      // Build content with grouping and capture ranges for styling
+      const title = "Rotation issues detected (please normalize Rotation to 0):";
+      const lines: string[] = [title, ""]; // blank line after title
+
+      type Range = { start: number; end: number; kind: "title" | "set" | "variant" };
+      const ranges: Range[] = [{ start: 0, end: title.length, kind: "title" }];
+
+      let offset = title.length + 2; // title + newline + blank line
+      groupedIssues.forEach((g, gi) => {
+        const setLine = `• ${g.set}`;
+        lines.push(setLine);
+        ranges.push({ start: offset, end: offset + setLine.length, kind: "set" });
+        offset += setLine.length + 1;
+
+        g.variants.forEach(v => {
+          const variantLine = `  – ${v}`; // en dash
+          lines.push(variantLine);
+          ranges.push({ start: offset, end: offset + variantLine.length, kind: "variant" });
+          offset += variantLine.length + 1;
+        });
+
+        if (gi < groupedIssues.length - 1) {
+          lines.push("");
+          offset += 1; // blank line newline only
+        }
+      });
+
+      text.characters = lines.join("\n");
+      text.textAutoResize = "HEIGHT";
+      text.fontSize = 12;
+
+      // Apply styles per range
+      for (const r of ranges) {
+        if (r.kind === "title") {
+          text.setRangeFontName(r.start, r.end, { family: "Inter", style: "Bold" });
+          text.setRangeFontSize(r.start, r.end, 12);
+          text.setRangeFills(r.start, r.end, [{ type: "SOLID", color: { r: 1, g: 0, b: 0 } }]);
+        } else if (r.kind === "set") {
+          text.setRangeFontName(r.start, r.end, { family: "Inter", style: "Bold" });
+          text.setRangeFontSize(r.start, r.end, 12);
+        } else {
+          text.setRangeFontSize(r.start, r.end, 12);
+        }
+      }
+
+      text.x = sets[0]?.x ?? 0;
+      text.y = (sets[0]?.y ?? 0) - 40;
+      figma.currentPage.appendChild(text);
+      figma.viewport.scrollAndZoomIntoView([text]);
+    } catch {
+      // If font load or text creation fails, we already showed a toast; proceed to close
+    }
+    figma.closePlugin();
+    return;
+  }
 
   let processed = 0, offsetX = 0;
   for (const setNode of sets) {

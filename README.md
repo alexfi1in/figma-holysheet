@@ -20,6 +20,8 @@ It is tailored specifically for our icon libraries to ensure:
         ↓
 [Validate + deduplicate]
         ↓
+[Check Rotation ≠ 0 → report + stop]
+        ↓
 [Plan grid layout]
         ↓
 [Reset constraints to MIN/MIN]
@@ -50,12 +52,15 @@ It is tailored specifically for our icon libraries to ensure:
 2. 🧹 Cleans:
    - Resets variant constraints (`MIN/MIN`) to avoid layout stretching issues
 
-3. 📐 Positions:
+3. 🛑 Pre-checks:
+   - If any variant has `Rotation ≠ 0`, the plugin shows a text report (grouped by `ComponentSet`) and stops. Designer should normalize rotations to `0` and re-run.
+
+4. 📐 Positions:
    - Calculates layout using properties: `Set`, `Style`, `Color`, and `Size`
    - Sorts variants alphabetically
-   - Places `ComponentSets` side-by-side with padding
+   - Places `ComponentSets` side-by-side with padding (`gapBetweenSets`)
 
-4. 🎯 Finishes:
+5. 🎯 Finishes:
    - Resizes each `ComponentSet` to fit its content
    - Zooms into updated sets
    - Notifies user with success summary
@@ -68,8 +73,8 @@ Adjust layout logic in `CONFIG` section of the plugin code:
 ```ts
 const CONFIG = {
   padding: 20,
-  step: 48,
-  gapBetweenSets: 40,
+  step: 52,
+  gapBetweenSets: 20,
   props: {
     set: "Set",
     style: "Style",
@@ -78,3 +83,10 @@ const CONFIG = {
   }
 };
 ```
+
+Note on rotation report:
+- The report title and set names are bold; the entire report uses 12 px font size; groups are separated by a blank line. Example:
+  - Rotation issues detected (please normalize Rotation to 0):
+  - • alert-off
+    - Set=fluent, Style=filled, Color=no_color, Size=16
+    - Set=fluent, Style=filled, Color=yellow, Size=16
