@@ -220,7 +220,7 @@ const LayoutService = (() => {
                 try {
                     text.fontName = { family: "Inter", style: "Regular" };
                 }
-                catch (_f) { }
+                catch (_) { /* keep default font if unavailable */ }
                 // Build content with grouping and capture ranges for styling
                 const title = "Rotation issues detected (please normalize Rotation to 0):";
                 const lines = [title, ""]; // blank line after title
@@ -265,7 +265,7 @@ const LayoutService = (() => {
                 figma.currentPage.appendChild(text);
                 figma.viewport.scrollAndZoomIntoView([text]);
             }
-            catch (_g) {
+            catch (_f) {
                 // If font load or text creation fails, we already showed a toast; proceed to close
             }
             figma.closePlugin();

@@ -221,7 +221,7 @@ const LayoutService = (() => {
       await figma.loadFontAsync({ family: "Inter", style: "Regular" });
       await figma.loadFontAsync({ family: "Inter", style: "Bold" });
       const text = figma.createText();
-      try { text.fontName = { family: "Inter", style: "Regular" }; } catch {}
+      try { text.fontName = { family: "Inter", style: "Regular" }; } catch ( _ ) { /* keep default font if unavailable */ }
 
       // Build content with grouping and capture ranges for styling
       const title = "Rotation issues detected (please normalize Rotation to 0):";
