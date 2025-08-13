@@ -103,35 +103,21 @@ const Inspector = (() => {
 
   function collectRotationIssues(set: ComponentSetNode): string[] {
     const issues: string[] = [];
-
-    function walk(n: SceneNode, pushIssue: () => void) {
-      if (hasNonZeroRotation(n)) pushIssue();
-      if ("children" in n) n.children.forEach(c => walk(c as SceneNode, pushIssue));
-    }
-
     for (const child of set.children) {
       if (child.type !== "COMPONENT") continue;
-      let flagged = false;
-      const push = () => { if (!flagged) { issues.push(`${set.name} / ${child.name}`); flagged = true; } };
-      walk(child, push);
+      if (hasNonZeroRotation(child as unknown as SceneNode)) {
+        issues.push(`${set.name} / ${child.name}`);
+      }
     }
     return issues;
   }
 
   function collectRotationIssuesGrouped(set: ComponentSetNode): { set: string; variants: string[] } | null {
     const variants: string[] = [];
-
-    function hasIssue(n: SceneNode): boolean {
-      if (hasNonZeroRotation(n)) return true;
-      if ("children" in n) return n.children.some(c => hasIssue(c as SceneNode));
-      return false;
-    }
-
     for (const child of set.children) {
       if (child.type !== "COMPONENT") continue;
-      if (hasIssue(child as unknown as SceneNode)) variants.push(child.name);
+      if (hasNonZeroRotation(child as unknown as SceneNode)) variants.push(child.name);
     }
-
     return variants.length ? { set: set.name, variants } : null;
   }
 

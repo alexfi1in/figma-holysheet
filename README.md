@@ -84,9 +84,8 @@ const CONFIG = {
 };
 ```
 
-Note on rotation report:
-- The report title and set names are bold; the entire report uses 12 px font size; groups are separated by a blank line. Example:
-  - Rotation issues detected (please normalize Rotation to 0):
-  - • alert-off
-    - Set=fluent, Style=filled, Color=no_color, Size=16
-    - Set=fluent, Style=filled, Color=yellow, Size=16
+## HolySheet — Rotation pre-check
+- Blocks layout if any variant has Rotation ≠ 0
+- Shows a 5s toast and inserts a grouped text report, then stops
+- No auto-fix applied
+- Fix: set variant Rotation = 0 and run again

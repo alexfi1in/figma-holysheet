@@ -99,37 +99,21 @@ const Inspector = (() => {
     }
     function collectRotationIssues(set) {
         const issues = [];
-        function walk(n, pushIssue) {
-            if (hasNonZeroRotation(n))
-                pushIssue();
-            if ("children" in n)
-                n.children.forEach(c => walk(c, pushIssue));
-        }
         for (const child of set.children) {
             if (child.type !== "COMPONENT")
                 continue;
-            let flagged = false;
-            const push = () => { if (!flagged) {
+            if (hasNonZeroRotation(child)) {
                 issues.push(`${set.name} / ${child.name}`);
-                flagged = true;
-            } };
-            walk(child, push);
+            }
         }
         return issues;
     }
     function collectRotationIssuesGrouped(set) {
         const variants = [];
-        function hasIssue(n) {
-            if (hasNonZeroRotation(n))
-                return true;
-            if ("children" in n)
-                return n.children.some(c => hasIssue(c));
-            return false;
-        }
         for (const child of set.children) {
             if (child.type !== "COMPONENT")
                 continue;
-            if (hasIssue(child))
+            if (hasNonZeroRotation(child))
                 variants.push(child.name);
         }
         return variants.length ? { set: set.name, variants } : null;
