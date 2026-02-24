@@ -19,7 +19,7 @@ The plugin reads four variant properties from each `ComponentSet` and uses them 
 
 After positioning all variants, the plugin:
 - Resizes each `ComponentSet` to fit its content
-- Sets `Center / Center` constraints on every variant
+- Sets `Center / Center` constraints on every variant and all its inner layers recursively
 - Places all sets side by side (in auto mode) and zooms in
 
 ---
