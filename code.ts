@@ -77,6 +77,11 @@ const Inspector = (() => {
     node.constraints = { horizontal: "MIN", vertical: "MIN" };
   }
 
+  function applyCenterConstraints(node: SceneNode) {
+    if ("constraints" in node) node.constraints = { horizontal: "CENTER", vertical: "CENTER" };
+    if ("children" in node) node.children.forEach(applyCenterConstraints);
+  }
+
   function hasNonZeroRotation(node: ComponentNode): boolean {
     return Math.abs(node.rotation) > 0.001;
   }
@@ -90,7 +95,7 @@ const Inspector = (() => {
     return variants.length ? { set: set.name, variants } : null;
   }
 
-  return { variantKey, readVariantProperties, validate, resetConstraints, collectRotationIssuesGrouped };
+  return { variantKey, readVariantProperties, validate, resetConstraints, applyCenterConstraints, collectRotationIssuesGrouped };
 })();
 
 /** ========== [ LAYOUT ] ========== **/
@@ -166,9 +171,7 @@ const LayoutService = (() => {
     });
     setNode.children.forEach(c => { c.x -= (minX - CONFIG.padding); c.y -= (minY - CONFIG.padding); });
     setNode.resizeWithoutConstraints(maxX - minX + CONFIG.padding * 2, maxY - minY + CONFIG.padding * 2);
-    info.variants.forEach(v => {
-      v.node.constraints = { horizontal: "CENTER", vertical: "CENTER" };
-    });
+    info.variants.forEach(v => Inspector.applyCenterConstraints(v.node));
   }
 
   return { plan, apply };
