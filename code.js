@@ -22,22 +22,13 @@ const CONFIG = {
     props: { set: "Set", style: "Style", color: "Color", size: "Size" }
 };
 /** ========== [ LOGGER ] ========== **/
-const Logger = (() => {
-    const priority = { debug: 0, info: 1, error: 2 };
-    const current = "info";
-    function log(msg, l = "info") {
-        if (priority[l] < priority[current])
-            return;
-        if (l === "error") {
-            figma.notify(msg, { error: true, timeout: 5000 });
-            console.error("[HolySheet]", msg);
-        }
-        else {
-            console.log("[HolySheet]", msg);
-        }
-    }
-    return { log };
-})();
+const Logger = {
+    info: (msg) => console.log("[HolySheet]", msg),
+    error: (msg) => {
+        figma.notify(msg, { error: true, timeout: 5000 });
+        console.error("[HolySheet]", msg);
+    },
+};
 /** ========== [ INSPECTOR ] ========== **/
 const Inspector = (() => {
     function variantKey(props, keys) {
@@ -79,10 +70,7 @@ const Inspector = (() => {
         return null;
     }
     function resetConstraints(node) {
-        if ("constraints" in node)
-            node.constraints = { horizontal: "MIN", vertical: "MIN" };
-        if ("children" in node)
-            node.children.forEach(resetConstraints);
+        node.constraints = { horizontal: "MIN", vertical: "MIN" };
     }
     function hasNonZeroRotation(node) {
         return Math.abs(node.rotation) > 0.001;
@@ -235,7 +223,7 @@ function createRotationReport(groupedIssues, anchor) {
         yield figma.currentPage.loadAsync();
         const allSets = figma.currentPage.findAllWithCriteria({ types: ["COMPONENT_SET"] });
         if (!allSets.length) {
-            Logger.log("No ComponentSets on page.", "error");
+            Logger.error("No ComponentSets on page.");
             figma.closePlugin();
             return;
         }
@@ -249,7 +237,7 @@ function createRotationReport(groupedIssues, anchor) {
                 groupedIssues.push(group);
         }
         if (groupedIssues.length) {
-            Logger.log("Found nodes with Rotation ≠ 0. See generated report.", "error");
+            Logger.error("Found nodes with Rotation ≠ 0. See generated report.");
             try {
                 yield createRotationReport(groupedIssues, sets[0]);
             }
@@ -259,20 +247,20 @@ function createRotationReport(groupedIssues, anchor) {
         }
         let processed = 0, offsetX = 0;
         for (const setNode of sets) {
-            Logger.log(`Processing: ${setNode.name}`);
+            Logger.info(`Processing: ${setNode.name}`);
             const info = Inspector.readVariantProperties(setNode);
             if (!info) {
-                Logger.log(`No variants in "${setNode.name}".`, "error");
+                Logger.error(`No variants in "${setNode.name}".`);
                 continue;
             }
             const validationError = Inspector.validate(info);
             if (validationError) {
-                Logger.log(validationError, "error");
+                Logger.error(validationError);
                 continue;
             }
             const positions = LayoutService.plan(info);
             if (!positions) {
-                Logger.log(`Missing required variant properties (Style/Color/Size) in "${setNode.name}".`, "error");
+                Logger.error(`Missing required variant properties (Style/Color/Size) in "${setNode.name}".`);
                 continue;
             }
             LayoutService.apply(info, positions, setNode);
@@ -282,10 +270,10 @@ function createRotationReport(groupedIssues, anchor) {
                 offsetX += setNode.width + CONFIG.gapBetweenSets;
             }
             processed++;
-            Logger.log(`📐 Size: ${setNode.width}×${setNode.height}`);
+            Logger.info(`📐 Size: ${setNode.width}×${setNode.height}`);
         }
         if (!processed) {
-            Logger.log("No ComponentSets were updated. Check the errors above.", "error");
+            Logger.error("No ComponentSets were updated. Check the errors above.");
             figma.closePlugin();
             return;
         }

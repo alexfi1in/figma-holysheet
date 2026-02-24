@@ -15,21 +15,13 @@ const CONFIG = {
 } as const;
 
 /** ========== [ LOGGER ] ========== **/
-const Logger = (() => {
-  type Level = "debug" | "info" | "error";
-  const priority = { debug: 0, info: 1, error: 2 } as const;
-  const current: Level = "info";
-  function log(msg: string, l: Level = "info") {
-    if (priority[l] < priority[current]) return;
-    if (l === "error") {
-      figma.notify(msg, { error: true, timeout: 5000 });
-      console.error("[HolySheet]", msg);
-    } else {
-      console.log("[HolySheet]", msg);
-    }
-  }
-  return { log };
-})();
+const Logger = {
+  info: (msg: string) => console.log("[HolySheet]", msg),
+  error: (msg: string) => {
+    figma.notify(msg, { error: true, timeout: 5000 });
+    console.error("[HolySheet]", msg);
+  },
+};
 
 /** ========== [ TYPES ] ========== **/
 type Variant = { node: ComponentNode; properties: Record<string, string> };
@@ -81,9 +73,8 @@ const Inspector = (() => {
     return null;
   }
 
-  function resetConstraints(node: SceneNode) {
-    if ("constraints" in node) node.constraints = { horizontal: "MIN", vertical: "MIN" };
-    if ("children" in node) node.children.forEach(resetConstraints);
+  function resetConstraints(node: ComponentNode) {
+    node.constraints = { horizontal: "MIN", vertical: "MIN" };
   }
 
   function hasNonZeroRotation(node: ComponentNode): boolean {
@@ -243,7 +234,7 @@ async function createRotationReport(
 (async function run() {
   await figma.currentPage.loadAsync();
   const allSets = figma.currentPage.findAllWithCriteria({ types: ["COMPONENT_SET"] });
-  if (!allSets.length) { Logger.log("No ComponentSets on page.", "error"); figma.closePlugin(); return; }
+  if (!allSets.length) { Logger.error("No ComponentSets on page."); figma.closePlugin(); return; }
 
   const selected = figma.currentPage.selection.filter(n => n.type === "COMPONENT_SET") as ComponentSetNode[];
   const auto = !selected.length;
@@ -256,7 +247,7 @@ async function createRotationReport(
   }
 
   if (groupedIssues.length) {
-    Logger.log("Found nodes with Rotation ≠ 0. See generated report.", "error");
+    Logger.error("Found nodes with Rotation ≠ 0. See generated report.");
     try { await createRotationReport(groupedIssues, sets[0]); } catch { /* toast already shown */ }
     figma.closePlugin();
     return;
@@ -264,20 +255,20 @@ async function createRotationReport(
 
   let processed = 0, offsetX = 0;
   for (const setNode of sets) {
-    Logger.log(`Processing: ${setNode.name}`);
+    Logger.info(`Processing: ${setNode.name}`);
     const info = Inspector.readVariantProperties(setNode);
-    if (!info) { Logger.log(`No variants in "${setNode.name}".`, "error"); continue; }
+    if (!info) { Logger.error(`No variants in "${setNode.name}".`); continue; }
     const validationError = Inspector.validate(info);
-    if (validationError) { Logger.log(validationError, "error"); continue; }
+    if (validationError) { Logger.error(validationError); continue; }
     const positions = LayoutService.plan(info);
-    if (!positions) { Logger.log(`Missing required variant properties (Style/Color/Size) in "${setNode.name}".`, "error"); continue; }
+    if (!positions) { Logger.error(`Missing required variant properties (Style/Color/Size) in "${setNode.name}".`); continue; }
     LayoutService.apply(info, positions, setNode);
     if (auto) { setNode.x = offsetX; setNode.y = 0; offsetX += setNode.width + CONFIG.gapBetweenSets; }
-    processed++; Logger.log(`📐 Size: ${setNode.width}×${setNode.height}`);
+    processed++; Logger.info(`📐 Size: ${setNode.width}×${setNode.height}`);
   }
 
   if (!processed) {
-    Logger.log("No ComponentSets were updated. Check the errors above.", "error");
+    Logger.error("No ComponentSets were updated. Check the errors above.");
     figma.closePlugin();
     return;
   }
