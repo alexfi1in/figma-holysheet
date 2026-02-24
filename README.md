@@ -1,80 +1,61 @@
 # HolySheet – Figma Plugin
 
-**HolySheet** is an internal plugin created by DevExpress for managing and auto-arranging large sets of icon variants inside a Figma `ComponentSet`.
+Internal Figma plugin by DevExpress. Automatically arranges icon variants inside `ComponentSet` nodes into a structured grid based on their variant properties.
 
-It is tailored specifically for our icon libraries to ensure:
-- Visual consistency
-- Clean layer structure
-- Efficient grid-based layout based on variant properties
+Designed specifically for DevExpress icon libraries to keep sheets consistent, clean, and easy to maintain.
 
+---
 
+## How it works
 
-## ⚙️ How it works
+The plugin reads four variant properties from each `ComponentSet` and uses them to calculate a grid layout:
 
-### 🔁 Flow Overview
+| Property | Role in layout |
+|----------|----------------|
+| `Set` | Horizontal blocks — each Set value gets its own column group |
+| `Style` | Vertical sections within a block |
+| `Color` | Rows within each Style section — sorted: `N…` first (None), `S…` second (Solid), rest alphabetically |
+| `Size` | Columns within each block (sorted numerically) |
 
-```
-[Selection or whole page]
-        ↓
-[Analyze variants]
-        ↓
-[Validate + deduplicate]
-        ↓
-[Check Rotation ≠ 0 → report + stop]
-        ↓
-[Plan grid layout]
-        ↓
-[Reset constraints to MIN/MIN]
-        ↓
-[Position + reorder variants]
-        ↓
-[Resize each ComponentSet to fit]
-        ↓
-[Reposition sets horizontally]
-        ↓
-[Zoom to view] → ✅ Done!
-```
+After positioning all variants, the plugin:
+- Resizes each `ComponentSet` to fit its content
+- Sets `Center / Center` constraints on every variant
+- Places all sets side by side (in auto mode) and zooms in
 
-### 🧭 Grid Layout Strategy
+---
 
-- **Set** → horizontal blocks
-- **Style + Color** → vertical rows and lines
-- **Size** → horizontal columns inside each block
+## Usage
 
+Run the plugin in one of two modes:
 
+**Selected sets** — select one or more `ComponentSet` nodes before running. Only the selected sets are processed.
 
-## 🧪 Behavior Summary
+**Whole page** — run with nothing selected. All `ComponentSet` nodes on the current page are processed and arranged horizontally with a gap between them.
 
-1. ✅ Accepts:
-   - Single or multiple selected `ComponentSet` nodes
-   - If nothing is selected, processes **all ComponentSets** on the page
+---
 
-2. 🧹 Cleans:
-   - Resets variant constraints (`MIN/MIN`) to avoid layout stretching issues
+## Pre-checks
 
-3. 🛑 Pre-checks:
-   - If any variant has `Rotation ≠ 0`, the plugin shows a text report (grouped by `ComponentSet`) and stops. Designer should normalize rotations to `0` and re-run.
+Before any layout is applied, the plugin validates the data:
 
-4. 📐 Positions:
-   - Calculates layout using properties: `Set`, `Style`, `Color`, and `Size`
-   - Sorts variants alphabetically
-   - Places `ComponentSets` side-by-side with padding (`gapBetweenSets`)
+**Rotation check** — if any variant has `Rotation ≠ 0`, the plugin stops entirely and inserts a styled text report on the canvas, grouped by `ComponentSet`. No layout is applied until rotations are fixed.
 
-5. 🎯 Finishes:
-   - Resizes each `ComponentSet` to fit its content
-   - Zooms into updated sets
-   - Notifies user with success summary
+**Duplicate variants** — if two variants share the same combination of property values, the plugin reports the conflict and skips that set.
 
+**Missing properties** — if a `ComponentSet` is missing `Style`, `Color`, or `Size` properties, it is skipped with an error message.
 
+---
 
-## 🔧 Customization
+## Configuration
 
-Adjust layout logic in `CONFIG` section of the plugin code:
+Adjust layout constants in the `CONFIG` block at the top of `code.ts`:
+
 ```ts
 const CONFIG = {
-  padding: 20,
-  step: 52,
-  gapBetweenSets: 20,
+  padding: 20,         // inner padding inside each ComponentSet
+  step: 52,            // grid cell size (px)
+  gapBetweenBlocks: 52, // gap between Set-blocks inside one ComponentSet
+  gapBetweenSets: 20,  // gap between ComponentSet nodes on canvas (auto mode only)
   props: {
     set: "Set",
     style: "Style",
@@ -83,9 +64,3 @@ const CONFIG = {
   }
 };
 ```
-
-## HolySheet — Rotation pre-check
-- Blocks layout if any variant has Rotation ≠ 0
-- Shows a 5s toast and inserts a grouped text report, then stops
-- No auto-fix applied
-- Fix: set variant Rotation = 0 and run again
