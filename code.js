@@ -17,14 +17,14 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 const CONFIG = {
     padding: 20,
     step: 52,
+    gapBetweenBlocks: 52,
     gapBetweenSets: 20,
     props: { set: "Set", style: "Style", color: "Color", size: "Size" }
 };
 /** ========== [ LOGGER ] ========== **/
 const Logger = (() => {
     const priority = { debug: 0, info: 1, error: 2 };
-    let current = "info";
-    function setLevel(l) { current = l; }
+    const current = "info";
     function log(msg, l = "info") {
         if (priority[l] < priority[current])
             return;
@@ -36,7 +36,7 @@ const Logger = (() => {
             console.log("[HolySheet]", msg);
         }
     }
-    return { log, setLevel };
+    return { log };
 })();
 /** ========== [ INSPECTOR ] ========== **/
 const Inspector = (() => {
@@ -63,11 +63,8 @@ const Inspector = (() => {
                 valMap[k].add(v);
             }
         }
-        if (!variants.length) {
-            Logger.log("No variants in ComponentSet.", "error");
-            figma.closePlugin();
+        if (!variants.length)
             return null;
-        }
         sortByName(variants);
         return { propertyKeys: Array.from(keySet).sort(), propertyValues: valMap, variants };
     }
@@ -75,14 +72,11 @@ const Inspector = (() => {
         const seen = new Set();
         for (const v of info.variants) {
             const key = variantKey(v.properties, info.propertyKeys);
-            if (seen.has(key)) {
-                Logger.log(`Duplicate variant properties: ${key}`, "error");
-                figma.closePlugin();
-                return false;
-            }
+            if (seen.has(key))
+                return `Duplicate variant properties: ${key}`;
             seen.add(key);
         }
-        return true;
+        return null;
     }
     function resetConstraints(node) {
         if ("constraints" in node)
@@ -91,22 +85,7 @@ const Inspector = (() => {
             node.children.forEach(resetConstraints);
     }
     function hasNonZeroRotation(node) {
-        if (!("rotation" in node))
-            return false;
-        const r = node.rotation;
-        const normalized = ((r % 360) + 360) % 360;
-        return Math.abs(normalized) > 0.001;
-    }
-    function collectRotationIssues(set) {
-        const issues = [];
-        for (const child of set.children) {
-            if (child.type !== "COMPONENT")
-                continue;
-            if (hasNonZeroRotation(child)) {
-                issues.push(`${set.name} / ${child.name}`);
-            }
-        }
-        return issues;
+        return Math.abs(node.rotation) > 0.001;
     }
     function collectRotationIssuesGrouped(set) {
         const variants = [];
@@ -118,7 +97,7 @@ const Inspector = (() => {
         }
         return variants.length ? { set: set.name, variants } : null;
     }
-    return { variantKey, readVariantProperties, validate, resetConstraints, collectRotationIssues, collectRotationIssuesGrouped };
+    return { variantKey, readVariantProperties, validate, resetConstraints, collectRotationIssuesGrouped };
 })();
 /** ========== [ LAYOUT ] ========== **/
 const LayoutService = (() => {
@@ -131,12 +110,17 @@ const LayoutService = (() => {
     }
     function plan(info) {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
-        const { step, padding, props } = CONFIG;
+        const { step, padding, gapBetweenBlocks, props } = CONFIG;
         const { set: setProp, style: styleProp, color: colorProp, size: sizeProp } = props;
+        const styles = Array.from((_a = info.propertyValues[styleProp]) !== null && _a !== void 0 ? _a : []).sort().reverse();
+        const colors = sortColorKeys(Array.from((_b = info.propertyValues[colorProp]) !== null && _b !== void 0 ? _b : []));
+        const sizes = Array.from((_c = info.propertyValues[sizeProp]) !== null && _c !== void 0 ? _c : []).sort((a, b) => Number(a) - Number(b));
+        if (!sizes.length || !styles.length || !colors.length)
+            return null;
         // group variants by Set
         const setGroups = new Map();
         for (const v of info.variants) {
-            const key = (_a = v.properties[setProp]) !== null && _a !== void 0 ? _a : "default";
+            const key = (_d = v.properties[setProp]) !== null && _d !== void 0 ? _d : "default";
             let arr = setGroups.get(key);
             if (!arr) {
                 arr = [];
@@ -144,9 +128,6 @@ const LayoutService = (() => {
             }
             arr.push(v);
         }
-        const styles = Array.from((_b = info.propertyValues[styleProp]) !== null && _b !== void 0 ? _b : []).sort().reverse();
-        const colors = sortColorKeys(Array.from((_c = info.propertyValues[colorProp]) !== null && _c !== void 0 ? _c : []));
-        const sizes = Array.from((_d = info.propertyValues[sizeProp]) !== null && _d !== void 0 ? _d : []).sort((a, b) => Number(a) - Number(b));
         const idx = (arr) => new Map(arr.map((v, i) => [v, i]));
         const iStyle = idx(styles), iColor = idx(colors), iSize = idx(sizes);
         const pos = new Map();
@@ -162,18 +143,17 @@ const LayoutService = (() => {
                 const y = cellTop + step / 2 - v.node.height / 2;
                 pos.set(Inspector.variantKey(v.properties, info.propertyKeys), { x, y });
             }
-            baseX += blockW + step;
+            baseX += blockW + gapBetweenBlocks;
         }
         return pos;
     }
     function apply(info, map, setNode) {
-        info.variants.forEach(v => { Inspector.resetConstraints(v.node); v.node.x = v.node.y = 0; });
         info.variants.forEach(v => {
+            var _a, _b;
+            Inspector.resetConstraints(v.node);
             const p = map.get(Inspector.variantKey(v.properties, info.propertyKeys));
-            if (p) {
-                v.node.x = p.x;
-                v.node.y = p.y;
-            }
+            v.node.x = (_a = p === null || p === void 0 ? void 0 : p.x) !== null && _a !== void 0 ? _a : 0;
+            v.node.y = (_b = p === null || p === void 0 ? void 0 : p.y) !== null && _b !== void 0 ? _b : 0;
         });
         const ordered = setNode.children.slice().sort((a, b) => (a.y === b.y ? a.x - b.x : a.y - b.y));
         ordered.forEach((n, i) => setNode.insertChild(i, n));
@@ -187,15 +167,70 @@ const LayoutService = (() => {
             maxY = Math.max(maxY, c.y + c.height);
         });
         setNode.children.forEach(c => { c.x -= (minX - CONFIG.padding); c.y -= (minY - CONFIG.padding); });
-        setNode.resize(maxX - minX + CONFIG.padding * 2, maxY - minY + CONFIG.padding * 2);
+        setNode.resizeWithoutConstraints(maxX - minX + CONFIG.padding * 2, maxY - minY + CONFIG.padding * 2);
     }
     return { plan, apply };
 })();
+/** ========== [ ROTATION REPORT ] ========== **/
+function createRotationReport(groupedIssues, anchor) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
+        yield figma.loadFontAsync({ family: "Inter", style: "Regular" });
+        yield figma.loadFontAsync({ family: "Inter", style: "Bold" });
+        const text = figma.createText();
+        try {
+            text.fontName = { family: "Inter", style: "Regular" };
+        }
+        catch ( /* keep default font if unavailable */_c) { /* keep default font if unavailable */ }
+        const title = "Rotation issues detected (please normalize Rotation to 0):";
+        const lines = [title, ""];
+        const ranges = [{ start: 0, end: title.length, kind: "title" }];
+        let offset = title.length + 2;
+        groupedIssues.forEach((g, gi) => {
+            const setLine = `• ${g.set}`;
+            lines.push(setLine);
+            ranges.push({ start: offset, end: offset + setLine.length, kind: "set" });
+            offset += setLine.length + 1;
+            g.variants.forEach(v => {
+                const variantLine = `  – ${v}`;
+                lines.push(variantLine);
+                ranges.push({ start: offset, end: offset + variantLine.length, kind: "variant" });
+                offset += variantLine.length + 1;
+            });
+            if (gi < groupedIssues.length - 1) {
+                lines.push("");
+                offset += 1;
+            }
+        });
+        text.characters = lines.join("\n");
+        text.textAutoResize = "HEIGHT";
+        text.fontSize = 12;
+        for (const r of ranges) {
+            if (r.kind === "title") {
+                text.setRangeFontName(r.start, r.end, { family: "Inter", style: "Bold" });
+                text.setRangeFontSize(r.start, r.end, 12);
+                text.setRangeFills(r.start, r.end, [{ type: "SOLID", color: { r: 1, g: 0, b: 0 } }]);
+            }
+            else if (r.kind === "set") {
+                text.setRangeFontName(r.start, r.end, { family: "Inter", style: "Bold" });
+                text.setRangeFontSize(r.start, r.end, 12);
+            }
+            else {
+                text.setRangeFontSize(r.start, r.end, 12);
+            }
+        }
+        text.x = (_a = anchor === null || anchor === void 0 ? void 0 : anchor.x) !== null && _a !== void 0 ? _a : 0;
+        text.y = ((_b = anchor === null || anchor === void 0 ? void 0 : anchor.y) !== null && _b !== void 0 ? _b : 0) - 40;
+        figma.currentPage.appendChild(text);
+        figma.viewport.scrollAndZoomIntoView([text]);
+    });
+}
 /** ========== [ MAIN ] ========== **/
 (function run() {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e;
-        const allSets = figma.currentPage.findAll(n => n.type === "COMPONENT_SET");
+        var _a;
+        yield figma.currentPage.loadAsync();
+        const allSets = figma.currentPage.findAllWithCriteria({ types: ["COMPONENT_SET"] });
         if (!allSets.length) {
             Logger.log("No ComponentSets on page.", "error");
             figma.closePlugin();
@@ -211,63 +246,11 @@ const LayoutService = (() => {
                 groupedIssues.push(group);
         }
         if (groupedIssues.length) {
-            // Show toast immediately to guarantee user feedback even if text creation fails
             Logger.log("Found nodes with Rotation ≠ 0. See generated report.", "error");
             try {
-                yield figma.loadFontAsync({ family: "Inter", style: "Regular" });
-                yield figma.loadFontAsync({ family: "Inter", style: "Bold" });
-                const text = figma.createText();
-                try {
-                    text.fontName = { family: "Inter", style: "Regular" };
-                }
-                catch (_) { /* keep default font if unavailable */ }
-                // Build content with grouping and capture ranges for styling
-                const title = "Rotation issues detected (please normalize Rotation to 0):";
-                const lines = [title, ""]; // blank line after title
-                const ranges = [{ start: 0, end: title.length, kind: "title" }];
-                let offset = title.length + 2; // title + newline + blank line
-                groupedIssues.forEach((g, gi) => {
-                    const setLine = `• ${g.set}`;
-                    lines.push(setLine);
-                    ranges.push({ start: offset, end: offset + setLine.length, kind: "set" });
-                    offset += setLine.length + 1;
-                    g.variants.forEach(v => {
-                        const variantLine = `  – ${v}`; // en dash
-                        lines.push(variantLine);
-                        ranges.push({ start: offset, end: offset + variantLine.length, kind: "variant" });
-                        offset += variantLine.length + 1;
-                    });
-                    if (gi < groupedIssues.length - 1) {
-                        lines.push("");
-                        offset += 1; // blank line newline only
-                    }
-                });
-                text.characters = lines.join("\n");
-                text.textAutoResize = "HEIGHT";
-                text.fontSize = 12;
-                // Apply styles per range
-                for (const r of ranges) {
-                    if (r.kind === "title") {
-                        text.setRangeFontName(r.start, r.end, { family: "Inter", style: "Bold" });
-                        text.setRangeFontSize(r.start, r.end, 12);
-                        text.setRangeFills(r.start, r.end, [{ type: "SOLID", color: { r: 1, g: 0, b: 0 } }]);
-                    }
-                    else if (r.kind === "set") {
-                        text.setRangeFontName(r.start, r.end, { family: "Inter", style: "Bold" });
-                        text.setRangeFontSize(r.start, r.end, 12);
-                    }
-                    else {
-                        text.setRangeFontSize(r.start, r.end, 12);
-                    }
-                }
-                text.x = (_b = (_a = sets[0]) === null || _a === void 0 ? void 0 : _a.x) !== null && _b !== void 0 ? _b : 0;
-                text.y = ((_d = (_c = sets[0]) === null || _c === void 0 ? void 0 : _c.y) !== null && _d !== void 0 ? _d : 0) - 40;
-                figma.currentPage.appendChild(text);
-                figma.viewport.scrollAndZoomIntoView([text]);
+                yield createRotationReport(groupedIssues, sets[0]);
             }
-            catch (_f) {
-                // If font load or text creation fails, we already showed a toast; proceed to close
-            }
+            catch ( /* toast already shown */_b) { /* toast already shown */ }
             figma.closePlugin();
             return;
         }
@@ -275,9 +258,20 @@ const LayoutService = (() => {
         for (const setNode of sets) {
             Logger.log(`Processing: ${setNode.name}`);
             const info = Inspector.readVariantProperties(setNode);
-            if (!info || !Inspector.validate(info))
+            if (!info) {
+                Logger.log(`No variants in "${setNode.name}".`, "error");
                 continue;
+            }
+            const validationError = Inspector.validate(info);
+            if (validationError) {
+                Logger.log(validationError, "error");
+                continue;
+            }
             const positions = LayoutService.plan(info);
+            if (!positions) {
+                Logger.log(`Missing required variant properties (Style/Color/Size) in "${setNode.name}".`, "error");
+                continue;
+            }
             LayoutService.apply(info, positions, setNode);
             if (auto) {
                 setNode.x = offsetX;
@@ -287,7 +281,12 @@ const LayoutService = (() => {
             processed++;
             Logger.log(`📐 Size: ${setNode.width}×${setNode.height}`);
         }
-        if (auto && ((_e = sets[0]) === null || _e === void 0 ? void 0 : _e.parent)) {
+        if (!processed) {
+            Logger.log("No ComponentSets were updated. Check the errors above.", "error");
+            figma.closePlugin();
+            return;
+        }
+        if (auto && ((_a = sets[0]) === null || _a === void 0 ? void 0 : _a.parent)) {
             const parent = sets[0].parent;
             for (let i = sets.length - 1; i >= 0; i--)
                 parent.insertChild(0, sets[i]);
