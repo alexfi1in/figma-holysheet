@@ -175,6 +175,9 @@ const LayoutService = (() => {
     });
     setNode.children.forEach(c => { c.x -= (minX - CONFIG.padding); c.y -= (minY - CONFIG.padding); });
     setNode.resizeWithoutConstraints(maxX - minX + CONFIG.padding * 2, maxY - minY + CONFIG.padding * 2);
+    info.variants.forEach(v => {
+      v.node.constraints = { horizontal: "CENTER", vertical: "CENTER" };
+    });
   }
 
   return { plan, apply };
