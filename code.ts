@@ -101,8 +101,9 @@ const Inspector = (() => {
 /** ========== [ LAYOUT ] ========== **/
 const LayoutService = (() => {
   function sortColorKeys(keys: string[]): string[] {
+    // Sort: no_color first (starts with "n"), colored second
     return keys.sort((a, b) => {
-      const p = (c: string) => (c[0]?.toLowerCase() === "n" ? 0 : c[0]?.toLowerCase() === "s" ? 1 : 2);
+      const p = (c: string) => (c[0]?.toLowerCase() === "n" ? 0 : 1);
       const pa = p(a), pb = p(b);
       return pa === pb ? a.localeCompare(b) : pa - pb;
     });

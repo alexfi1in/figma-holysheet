@@ -14,7 +14,7 @@ The plugin reads four variant properties from each `ComponentSet` and uses them 
 |----------|----------------|
 | `Set` | Horizontal blocks — each Set value gets its own column group |
 | `Style` | Vertical sections within a block |
-| `Color` | Rows within each Style section — sorted: `N…` first (None), `S…` second (Solid), rest alphabetically |
+| `Color` | Rows within each Style section — sorted: `no_color` first, `colored` second |
 | `Size` | Columns within each block (sorted numerically) |
 
 After positioning all variants, the plugin:

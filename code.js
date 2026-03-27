@@ -96,8 +96,9 @@ const Inspector = (() => {
 /** ========== [ LAYOUT ] ========== **/
 const LayoutService = (() => {
     function sortColorKeys(keys) {
+        // Sort: no_color first (starts with "n"), colored second
         return keys.sort((a, b) => {
-            const p = (c) => { var _a, _b; return (((_a = c[0]) === null || _a === void 0 ? void 0 : _a.toLowerCase()) === "n" ? 0 : ((_b = c[0]) === null || _b === void 0 ? void 0 : _b.toLowerCase()) === "s" ? 1 : 2); };
+            const p = (c) => { var _a; return (((_a = c[0]) === null || _a === void 0 ? void 0 : _a.toLowerCase()) === "n" ? 0 : 1); };
             const pa = p(a), pb = p(b);
             return pa === pb ? a.localeCompare(b) : pa - pb;
         });
