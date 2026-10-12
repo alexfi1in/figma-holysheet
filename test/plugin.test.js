@@ -111,6 +111,50 @@ test("still lays out sets with the legacy Color property", async () => {
   assert.deepEqual(grid(set, "Color"), EXPECTED_GRID);
 });
 
+test("keeps the single-color row first for the pre-2.0 values monochrome / multicolor", async () => {
+  const set = componentSet("add", variants({
+    Set: ["fluent"], Style: ["regular"], Color: ["multicolor", "monochrome"], Size: ["16"],
+  }));
+
+  await runPlugin([set]);
+
+  assert.deepEqual(grid(set, "Color"), [["regular/monochrome/16"], ["regular/multicolor/16"]]);
+});
+
+test("puts unknown palette values after neutral and colored, alphabetically", async () => {
+  const set = componentSet("add", variants({
+    Set: ["fluent"], Style: ["regular"], Palette: ["zeta", "colored", "alpha", "neutral"], Size: ["16"],
+  }));
+
+  await runPlugin([set]);
+
+  assert.deepEqual(grid(set, "Palette"), [
+    ["regular/neutral/16"], ["regular/colored/16"], ["regular/alpha/16"], ["regular/zeta/16"],
+  ]);
+});
+
+test("lays out a set with colored variants only", async () => {
+  const set = componentSet("add", variants({
+    Set: ["fluent"], Style: ["regular"], Palette: ["colored"], Size: ["20", "16"],
+  }));
+
+  const notes = await runPlugin([set]);
+
+  assert.deepEqual(notes.filter(n => n.error), []);
+  assert.deepEqual(grid(set, "Palette"), [["regular/colored/16", "regular/colored/20"]]);
+});
+
+test("places Set blocks left to right: fluent, desktop_classic, blazor_classic", async () => {
+  const set = componentSet("add", variants({
+    Set: ["blazor_classic", "fluent", "desktop_classic"], Style: ["regular"], Palette: ["neutral"], Size: ["16"],
+  }));
+
+  await runPlugin([set]);
+
+  const row = [...set.children].sort((a, b) => a.x - b.x).map(v => v.variantProperties.Set);
+  assert.deepEqual(row, ["fluent", "desktop_classic", "blazor_classic"]);
+});
+
 test("names the Palette property when a set lacks it", async () => {
   const set = componentSet("add", variants({ Set: ["fluent"], Style: ["regular"], Size: ["16"] }));
 
