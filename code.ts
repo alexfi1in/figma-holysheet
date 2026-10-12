@@ -11,7 +11,11 @@ const CONFIG = {
   step: 52,
   gapBetweenBlocks: 52,
   gapBetweenSets: 20,
-  props: { set: "Set", style: "Style", color: "Color", size: "Size" }
+  props: { set: "Set", style: "Style", palette: "Palette", size: "Size" },
+  // The palette property was called Color before 2026-10
+  legacyPaletteProp: "Color",
+  // Known palette values, in row order; unknown ones follow alphabetically
+  paletteOrder: ["neutral", "colored"]
 } as const;
 
 /** ========== [ LOGGER ] ========== **/
@@ -100,24 +104,22 @@ const Inspector = (() => {
 
 /** ========== [ LAYOUT ] ========== **/
 const LayoutService = (() => {
-  function sortColorKeys(keys: string[]): string[] {
-    // Sort: no_color first (starts with "n"), colored second
-    return keys.sort((a, b) => {
-      const p = (c: string) => (c[0]?.toLowerCase() === "n" ? 0 : 1);
-      const pa = p(a), pb = p(b);
-      return pa === pb ? a.localeCompare(b) : pa - pb;
-    });
+  function sortPalettes(keys: string[]): string[] {
+    const order: readonly string[] = CONFIG.paletteOrder;
+    const rank = (p: string) => (order.indexOf(p) === -1 ? order.length : order.indexOf(p));
+    return keys.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   }
 
   function plan(info: VariantInfo): Map<string, { x: number; y: number }> | null {
-    const { step, padding, gapBetweenBlocks, props } = CONFIG;
-    const { set: setProp, style: styleProp, color: colorProp, size: sizeProp } = props;
+    const { step, padding, gapBetweenBlocks, props, legacyPaletteProp } = CONFIG;
+    const { set: setProp, style: styleProp, size: sizeProp } = props;
+    const paletteProp = info.propertyValues[props.palette] ? props.palette : legacyPaletteProp;
 
     const styles = Array.from(info.propertyValues[styleProp] ?? []).sort().reverse();
-    const colors = sortColorKeys(Array.from(info.propertyValues[colorProp] ?? []));
+    const palettes = sortPalettes(Array.from(info.propertyValues[paletteProp] ?? []));
     const sizes  = Array.from(info.propertyValues[sizeProp] ?? []).sort((a, b) => Number(a) - Number(b));
 
-    if (!sizes.length || !styles.length || !colors.length) return null;
+    if (!sizes.length || !styles.length || !palettes.length) return null;
 
     // group variants by Set
     const setGroups = new Map<string, Variant[]>();
@@ -132,7 +134,7 @@ const LayoutService = (() => {
     }
 
     const idx = (arr: string[]) => new Map(arr.map((v, i) => [v, i] as const));
-    const iStyle = idx(styles), iColor = idx(colors), iSize = idx(sizes);
+    const iStyle = idx(styles), iPalette = idx(palettes), iSize = idx(sizes);
 
     const pos = new Map<string, { x: number; y: number }>();
     let baseX = 0;
@@ -142,9 +144,9 @@ const LayoutService = (() => {
       for (const v of setGroups.get(setKey)!) {
         const sx = iSize.get(v.properties[sizeProp] ?? "") ?? 0;
         const sy = iStyle.get(v.properties[styleProp] ?? "") ?? 0;
-        const cy = iColor.get(v.properties[colorProp] ?? "") ?? 0;
+        const py = iPalette.get(v.properties[paletteProp] ?? "") ?? 0;
         const x = baseX + sx * step + padding;
-        const cellTop = sy * (colors.length * step) + cy * step + padding;
+        const cellTop = sy * (palettes.length * step) + py * step + padding;
         const y = cellTop + step / 2 - v.node.height / 2;
         pos.set(Inspector.variantKey(v.properties, info.propertyKeys), { x, y });
       }
@@ -265,7 +267,7 @@ async function createRotationReport(
     const validationError = Inspector.validate(info);
     if (validationError) { Logger.error(validationError); continue; }
     const positions = LayoutService.plan(info);
-    if (!positions) { Logger.error(`Missing required variant properties (Style/Color/Size) in "${setNode.name}".`); continue; }
+    if (!positions) { Logger.error(`Missing required variant properties (Style/Palette/Size) in "${setNode.name}".`); continue; }
     LayoutService.apply(info, positions, setNode);
     if (auto) { setNode.x = offsetX; setNode.y = 0; offsetX += setNode.width + CONFIG.gapBetweenSets; }
     processed++; Logger.info(`📐 Size: ${setNode.width}×${setNode.height}`);

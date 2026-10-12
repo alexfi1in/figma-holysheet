@@ -19,7 +19,11 @@ const CONFIG = {
     step: 52,
     gapBetweenBlocks: 52,
     gapBetweenSets: 20,
-    props: { set: "Set", style: "Style", color: "Color", size: "Size" }
+    props: { set: "Set", style: "Style", palette: "Palette", size: "Size" },
+    // The palette property was called Color before 2026-10
+    legacyPaletteProp: "Color",
+    // Known palette values, in row order; unknown ones follow alphabetically
+    paletteOrder: ["neutral", "colored"]
 };
 /** ========== [ LOGGER ] ========== **/
 const Logger = {
@@ -95,22 +99,20 @@ const Inspector = (() => {
 })();
 /** ========== [ LAYOUT ] ========== **/
 const LayoutService = (() => {
-    function sortColorKeys(keys) {
-        // Sort: no_color first (starts with "n"), colored second
-        return keys.sort((a, b) => {
-            const p = (c) => { var _a; return (((_a = c[0]) === null || _a === void 0 ? void 0 : _a.toLowerCase()) === "n" ? 0 : 1); };
-            const pa = p(a), pb = p(b);
-            return pa === pb ? a.localeCompare(b) : pa - pb;
-        });
+    function sortPalettes(keys) {
+        const order = CONFIG.paletteOrder;
+        const rank = (p) => (order.indexOf(p) === -1 ? order.length : order.indexOf(p));
+        return keys.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
     }
     function plan(info) {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
-        const { step, padding, gapBetweenBlocks, props } = CONFIG;
-        const { set: setProp, style: styleProp, color: colorProp, size: sizeProp } = props;
+        const { step, padding, gapBetweenBlocks, props, legacyPaletteProp } = CONFIG;
+        const { set: setProp, style: styleProp, size: sizeProp } = props;
+        const paletteProp = info.propertyValues[props.palette] ? props.palette : legacyPaletteProp;
         const styles = Array.from((_a = info.propertyValues[styleProp]) !== null && _a !== void 0 ? _a : []).sort().reverse();
-        const colors = sortColorKeys(Array.from((_b = info.propertyValues[colorProp]) !== null && _b !== void 0 ? _b : []));
+        const palettes = sortPalettes(Array.from((_b = info.propertyValues[paletteProp]) !== null && _b !== void 0 ? _b : []));
         const sizes = Array.from((_c = info.propertyValues[sizeProp]) !== null && _c !== void 0 ? _c : []).sort((a, b) => Number(a) - Number(b));
-        if (!sizes.length || !styles.length || !colors.length)
+        if (!sizes.length || !styles.length || !palettes.length)
             return null;
         // group variants by Set
         const setGroups = new Map();
@@ -124,7 +126,7 @@ const LayoutService = (() => {
             arr.push(v);
         }
         const idx = (arr) => new Map(arr.map((v, i) => [v, i]));
-        const iStyle = idx(styles), iColor = idx(colors), iSize = idx(sizes);
+        const iStyle = idx(styles), iPalette = idx(palettes), iSize = idx(sizes);
         const pos = new Map();
         let baseX = 0;
         const blockW = sizes.length * step;
@@ -132,9 +134,9 @@ const LayoutService = (() => {
             for (const v of setGroups.get(setKey)) {
                 const sx = (_f = iSize.get((_e = v.properties[sizeProp]) !== null && _e !== void 0 ? _e : "")) !== null && _f !== void 0 ? _f : 0;
                 const sy = (_h = iStyle.get((_g = v.properties[styleProp]) !== null && _g !== void 0 ? _g : "")) !== null && _h !== void 0 ? _h : 0;
-                const cy = (_k = iColor.get((_j = v.properties[colorProp]) !== null && _j !== void 0 ? _j : "")) !== null && _k !== void 0 ? _k : 0;
+                const py = (_k = iPalette.get((_j = v.properties[paletteProp]) !== null && _j !== void 0 ? _j : "")) !== null && _k !== void 0 ? _k : 0;
                 const x = baseX + sx * step + padding;
-                const cellTop = sy * (colors.length * step) + cy * step + padding;
+                const cellTop = sy * (palettes.length * step) + py * step + padding;
                 const y = cellTop + step / 2 - v.node.height / 2;
                 pos.set(Inspector.variantKey(v.properties, info.propertyKeys), { x, y });
             }
@@ -265,7 +267,7 @@ function createRotationReport(groupedIssues, anchor) {
             }
             const positions = LayoutService.plan(info);
             if (!positions) {
-                Logger.error(`Missing required variant properties (Style/Color/Size) in "${setNode.name}".`);
+                Logger.error(`Missing required variant properties (Style/Palette/Size) in "${setNode.name}".`);
                 continue;
             }
             LayoutService.apply(info, positions, setNode);

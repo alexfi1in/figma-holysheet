@@ -14,7 +14,7 @@ The plugin reads four variant properties from each `ComponentSet` and uses them 
 |----------|----------------|
 | `Set` | Horizontal blocks — each Set value gets its own column group |
 | `Style` | Vertical sections within a block |
-| `Color` | Rows within each Style section — sorted: `no_color` first, `colored` second |
+| `Palette` | Rows within each Style section — `neutral` first, `colored` second (other values follow alphabetically). Sets that still use the old `Color` property are laid out the same way |
 | `Size` | Columns within each block (sorted numerically) |
 
 After positioning all variants, the plugin:
@@ -42,7 +42,7 @@ Before any layout is applied, the plugin validates the data:
 
 **Duplicate variants** — if two variants share the same combination of property values, the plugin reports the conflict and skips that set.
 
-**Missing properties** — if a `ComponentSet` is missing `Style`, `Color`, or `Size` properties, it is skipped with an error message.
+**Missing properties** — if a `ComponentSet` is missing `Style`, `Palette` (or the old `Color`), or `Size` properties, it is skipped with an error message.
 
 ---
 
@@ -59,8 +59,21 @@ const CONFIG = {
   props: {
     set: "Set",
     style: "Style",
-    color: "Color",
+    palette: "Palette",
     size: "Size"
-  }
+  },
+  legacyPaletteProp: "Color",            // read when a set has no Palette property
+  paletteOrder: ["neutral", "colored"]   // row order of palette values
 };
+```
+
+---
+
+## Development
+
+`code.ts` is compiled to `code.js`, which Figma loads — commit both.
+
+```bash
+npm ci
+npm test   # builds code.js and runs the layout tests in test/
 ```
