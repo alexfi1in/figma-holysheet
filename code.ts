@@ -14,7 +14,10 @@ const CONFIG = {
   props: { set: "Set", style: "Style", palette: "Palette", size: "Size" },
   // The palette property was called Color before 2026-10
   legacyPaletteProp: "Color",
-  // Known palette values, in row order; unknown ones follow alphabetically
+  // Known values in layout order; unknown ones follow alphabetically. The top-left variant
+  // (first Set, Style and palette, smallest Size) becomes the set's default variant in Figma.
+  setOrder: ["fluent", "desktop_classic", "blazor_classic"],
+  styleOrder: ["regular", "light", "filled"],
   paletteOrder: ["neutral", "colored"]
 } as const;
 
@@ -104,9 +107,8 @@ const Inspector = (() => {
 
 /** ========== [ LAYOUT ] ========== **/
 const LayoutService = (() => {
-  function sortPalettes(keys: string[]): string[] {
-    const order: readonly string[] = CONFIG.paletteOrder;
-    const rank = (p: string) => (order.indexOf(p) === -1 ? order.length : order.indexOf(p));
+  function sortByOrder(keys: string[], order: readonly string[]): string[] {
+    const rank = (k: string) => (order.indexOf(k) === -1 ? order.length : order.indexOf(k));
     return keys.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   }
 
@@ -115,8 +117,8 @@ const LayoutService = (() => {
     const { set: setProp, style: styleProp, size: sizeProp } = props;
     const paletteProp = info.propertyValues[props.palette] ? props.palette : legacyPaletteProp;
 
-    const styles = Array.from(info.propertyValues[styleProp] ?? []).sort().reverse();
-    const palettes = sortPalettes(Array.from(info.propertyValues[paletteProp] ?? []));
+    const styles = sortByOrder(Array.from(info.propertyValues[styleProp] ?? []), CONFIG.styleOrder);
+    const palettes = sortByOrder(Array.from(info.propertyValues[paletteProp] ?? []), CONFIG.paletteOrder);
     const sizes  = Array.from(info.propertyValues[sizeProp] ?? []).sort((a, b) => Number(a) - Number(b));
 
     if (!sizes.length || !styles.length || !palettes.length) return null;
@@ -140,7 +142,7 @@ const LayoutService = (() => {
     let baseX = 0;
     const blockW = sizes.length * step;
 
-    for (const setKey of Array.from(setGroups.keys()).sort().reverse()) {
+    for (const setKey of sortByOrder(Array.from(setGroups.keys()), CONFIG.setOrder)) {
       for (const v of setGroups.get(setKey)!) {
         const sx = iSize.get(v.properties[sizeProp] ?? "") ?? 0;
         const sy = iStyle.get(v.properties[styleProp] ?? "") ?? 0;
@@ -237,14 +239,54 @@ async function createRotationReport(
 }
 
 /** ========== [ MAIN ] ========== **/
-(async function run() {
-  await figma.currentPage.loadAsync();
-  const allSets = figma.currentPage.findAllWithCriteria({ types: ["COMPONENT_SET"] });
-  if (!allSets.length) { Logger.error("No ComponentSets on page."); figma.closePlugin(); return; }
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-  const selected = figma.currentPage.selection.filter(n => n.type === "COMPONENT_SET") as ComponentSetNode[];
-  const auto = !selected.length;
-  const sets = [...(auto ? allSets : selected)].sort((a, b) => a.name.localeCompare(b.name));
+// The sets a selection points at: selected sets, the set around a selected variant or layer,
+// and the sets inside selected frames, sections and groups
+function setsInSelection(selection: readonly SceneNode[]): ComponentSetNode[] {
+  const found = new Set<ComponentSetNode>();
+  for (const node of selection) {
+    let n: BaseNode | null = node;
+    while (n && n.type !== "COMPONENT_SET") n = n.parent;
+    if (n) found.add(n as ComponentSetNode);
+    else if ("findAllWithCriteria" in node) node.findAllWithCriteria({ types: ["COMPONENT_SET"] }).forEach(s => found.add(s));
+  }
+  return Array.from(found);
+}
+
+// Lays out one set; returns an error message instead when it can't
+function layOut(setNode: ComponentSetNode): string | null {
+  const info = Inspector.readVariantProperties(setNode);
+  if (!info) return `No variants in "${setNode.name}".`;
+  const validationError = Inspector.validate(info);
+  if (validationError) return validationError;
+  const positions = LayoutService.plan(info);
+  if (!positions) return `Missing required variant properties (Style/Palette/Size) in "${setNode.name}".`;
+  LayoutService.apply(info, positions, setNode);
+  return null;
+}
+
+// Whole-page mode lines up the sets lying directly on the page (skipped ones too, so nothing overlaps),
+// sorted by name, and orders their layers the same way. Sets inside frames and sections keep their place.
+function arrangeRow(sets: ComponentSetNode[]) {
+  const row = sets.filter(s => s.parent?.type === "PAGE");
+  let offsetX = 0;
+  for (const s of row) { s.x = offsetX; s.y = 0; offsetX += s.width + CONFIG.gapBetweenSets; }
+  for (let i = row.length - 1; i >= 0; i--) row[i].parent!.insertChild(0, row[i]);
+}
+
+async function run() {
+  await figma.currentPage.loadAsync();
+  const selection = figma.currentPage.selection;
+  const auto = !selection.length;
+  const sets = (auto ? figma.currentPage.findAllWithCriteria({ types: ["COMPONENT_SET"] }) : setsInSelection(selection))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!sets.length) {
+    Logger.error(auto
+      ? "No ComponentSets on page."
+      : "Nothing to lay out: select component sets, their variants, or frames that contain them.");
+    return;
+  }
 
   const groupedIssues: { set: string; variants: string[] }[] = [];
   for (const setNode of sets) {
@@ -255,36 +297,31 @@ async function createRotationReport(
   if (groupedIssues.length) {
     Logger.error("Found nodes with Rotation ≠ 0. See generated report.");
     try { await createRotationReport(groupedIssues, sets[0]); } catch { /* toast already shown */ }
-    figma.closePlugin();
     return;
   }
 
-  let processed = 0, offsetX = 0;
+  let processed = 0;
   for (const setNode of sets) {
     Logger.info(`Processing: ${setNode.name}`);
-    const info = Inspector.readVariantProperties(setNode);
-    if (!info) { Logger.error(`No variants in "${setNode.name}".`); continue; }
-    const validationError = Inspector.validate(info);
-    if (validationError) { Logger.error(validationError); continue; }
-    const positions = LayoutService.plan(info);
-    if (!positions) { Logger.error(`Missing required variant properties (Style/Palette/Size) in "${setNode.name}".`); continue; }
-    LayoutService.apply(info, positions, setNode);
-    if (auto) { setNode.x = offsetX; setNode.y = 0; offsetX += setNode.width + CONFIG.gapBetweenSets; }
+    let error: string | null;
+    try { error = layOut(setNode); } catch (e) { error = `"${setNode.name}": ${errorMessage(e)}`; }
+    if (error) { Logger.error(error); continue; }
     processed++; Logger.info(`📐 Size: ${setNode.width}×${setNode.height}`);
   }
 
   if (!processed) {
     Logger.error("No ComponentSets were updated. Check the errors above.");
-    figma.closePlugin();
     return;
   }
 
-  if (auto && sets[0]?.parent) {
-    const parent = sets[0].parent!;
-    for (let i = sets.length - 1; i >= 0; i--) parent.insertChild(0, sets[i]);
-  }
+  if (auto) arrangeRow(sets);
 
   figma.viewport.scrollAndZoomIntoView(sets);
   figma.notify(`✅ Done! ${processed} ComponentSet${processed === 1 ? "" : "s"} updated.`);
-  figma.closePlugin();
+}
+
+(async function main() {
+  try { await run(); }
+  catch (e) { Logger.error(`HolySheet stopped: ${errorMessage(e)}`); }
+  finally { figma.closePlugin(); }
 })();
