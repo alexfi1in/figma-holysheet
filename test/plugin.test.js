@@ -185,6 +185,22 @@ const ICON = { Set: ["fluent"], Style: ["regular"], Palette: ["neutral"], Size: 
 
 // Whole-page mode
 
+test("with nothing selected, lays out every set on the page and lines them up by name (by design)", async () => {
+  const c = componentSet("c", variants(ICON));
+  const a = componentSet("a", variants(ICON));
+  const b = componentSet("b", variants(ICON));
+  c.x = 50; a.x = 900; a.y = 300; b.x = 400;
+
+  const notes = await runPlugin([c, a, b]);
+
+  assert.deepEqual(errorsOf(notes), []);
+  for (const set of [a, b, c]) assert.deepEqual(grid(set, "Palette"), [["regular/neutral/16"]]);
+  assert.deepEqual([a.x, b.x, c.x], [0, a.width + 20, a.width + 20 + b.width + 20]);
+  assert.deepEqual([a.y, b.y, c.y], [0, 0, 0]);
+  assert.deepEqual(a.parent.children.map(s => s.name), ["a", "b", "c"]);
+  assert.ok(notes.some(n => n.msg.includes("3 ComponentSets updated")));
+});
+
 test("whole-page mode leaves sets inside frames in their frame and place", async () => {
   const onPage = componentSet("zeta", variants(ICON));
   const inFrame = componentSet("alpha", variants(ICON));
