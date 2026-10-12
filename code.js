@@ -171,33 +171,43 @@ const LayoutService = (() => {
     }
     return { plan, apply };
 })();
-/** ========== [ ROTATION REPORT ] ========== **/
-function createRotationReport(groupedIssues, anchor) {
+const REPORT_NAME = "HolySheet report";
+const REPORT_KEY = "holysheet"; // plugin data that marks the plugin's own report, so a designer's text is never removed
+function removeOldReports(page) {
+    for (const node of page.children.slice()) {
+        if (node.getPluginData(REPORT_KEY) === "report")
+            node.remove();
+    }
+}
+// A text on the canvas listing every problem by set, placed above the first set with problems
+function createReport(groups) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b;
+        var _a;
         yield figma.loadFontAsync({ family: "Inter", style: "Regular" });
         yield figma.loadFontAsync({ family: "Inter", style: "Bold" });
         const text = figma.createText();
+        text.name = REPORT_NAME;
+        text.setPluginData(REPORT_KEY, "report");
         try {
             text.fontName = { family: "Inter", style: "Regular" };
         }
-        catch ( /* keep default font if unavailable */_c) { /* keep default font if unavailable */ }
-        const title = "Rotation issues detected (please normalize Rotation to 0):";
+        catch ( /* keep default font if unavailable */_b) { /* keep default font if unavailable */ }
+        const title = "HolySheet changed nothing. Fix these problems and run it again:";
         const lines = [title, ""];
         const ranges = [{ start: 0, end: title.length, kind: "title" }];
         let offset = title.length + 2;
-        groupedIssues.forEach((g, gi) => {
-            const setLine = `• ${g.set}`;
+        groups.forEach((g, gi) => {
+            const setLine = `• ${g.set.name}`;
             lines.push(setLine);
             ranges.push({ start: offset, end: offset + setLine.length, kind: "set" });
             offset += setLine.length + 1;
-            g.variants.forEach(v => {
-                const variantLine = `  – ${v}`;
-                lines.push(variantLine);
-                ranges.push({ start: offset, end: offset + variantLine.length, kind: "variant" });
-                offset += variantLine.length + 1;
+            g.problems.forEach(p => {
+                const problemLine = `  – ${p}`;
+                lines.push(problemLine);
+                ranges.push({ start: offset, end: offset + problemLine.length, kind: "variant" });
+                offset += problemLine.length + 1;
             });
-            if (gi < groupedIssues.length - 1) {
+            if (gi < groups.length - 1) {
                 lines.push("");
                 offset += 1;
             }
@@ -219,9 +229,12 @@ function createRotationReport(groupedIssues, anchor) {
                 text.setRangeFontSize(r.start, r.end, 12);
             }
         }
-        text.x = (_a = anchor === null || anchor === void 0 ? void 0 : anchor.x) !== null && _a !== void 0 ? _a : 0;
-        text.y = ((_b = anchor === null || anchor === void 0 ? void 0 : anchor.y) !== null && _b !== void 0 ? _b : 0) - 40;
+        // On the page itself, in page coordinates: a set may lie inside a frame
         figma.currentPage.appendChild(text);
+        const anchor = groups[0].set;
+        const box = (_a = anchor.absoluteBoundingBox) !== null && _a !== void 0 ? _a : { x: anchor.x, y: anchor.y };
+        text.x = box.x;
+        text.y = box.y - text.height - 40;
         figma.viewport.scrollAndZoomIntoView([text]);
     });
 }
@@ -242,22 +255,30 @@ function setsInSelection(selection) {
     }
     return Array.from(found);
 }
-// Lays out one set; returns an error message instead when it can't
-function layOut(setNode) {
-    const info = Inspector.readVariantProperties(setNode);
-    if (!info)
-        return `No variants in "${setNode.name}".`;
-    const validationError = Inspector.validate(info);
-    if (validationError)
-        return validationError;
-    const positions = LayoutService.plan(info);
-    if (!positions)
-        return `Missing required variant properties (Style/Palette/Size) in "${setNode.name}".`;
-    LayoutService.apply(info, positions, setNode);
-    return null;
+// Checks one set without changing it: its layout plan, or every problem that stops it from being laid out
+function check(setNode) {
+    const problems = [];
+    try {
+        const rotated = Inspector.collectRotationIssuesGrouped(setNode);
+        if (rotated)
+            problems.push(...rotated.variants.map(v => `Rotation ≠ 0, set it to 0: ${v}`));
+        const info = Inspector.readVariantProperties(setNode);
+        if (!info)
+            return { problems: [...problems, "No variants."] };
+        const duplicate = Inspector.validate(info);
+        if (duplicate)
+            problems.push(duplicate);
+        const positions = LayoutService.plan(info);
+        if (!positions)
+            problems.push("Missing required variant properties (Style/Palette/Size).");
+        return problems.length || !positions ? { problems } : { plan: { set: setNode, info, positions } };
+    }
+    catch (e) {
+        return { problems: [...problems, `Can't read the set: ${errorMessage(e)}`] };
+    }
 }
-// Whole-page mode lines up the sets lying directly on the page (skipped ones too, so nothing overlaps),
-// sorted by name, and orders their layers the same way. Sets inside frames and sections keep their place.
+// Whole-page mode lines up the sets lying directly on the page, sorted by name, and orders their layers
+// the same way. Sets inside frames and sections keep their place.
 function arrangeRow(sets) {
     const row = sets.filter(s => { var _a; return ((_a = s.parent) === null || _a === void 0 ? void 0 : _a.type) === "PAGE"; });
     let offsetX = 0;
@@ -271,10 +292,12 @@ function arrangeRow(sets) {
 }
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
-        yield figma.currentPage.loadAsync();
-        const selection = figma.currentPage.selection;
+        const page = figma.currentPage;
+        yield page.loadAsync();
+        removeOldReports(page);
+        const selection = page.selection;
         const auto = !selection.length;
-        const sets = (auto ? figma.currentPage.findAllWithCriteria({ types: ["COMPONENT_SET"] }) : setsInSelection(selection))
+        const sets = (auto ? page.findAllWithCriteria({ types: ["COMPONENT_SET"] }) : setsInSelection(selection))
             .sort((a, b) => a.name.localeCompare(b.name));
         if (!sets.length) {
             Logger.error(auto
@@ -282,45 +305,42 @@ function run() {
                 : "Nothing to lay out: select component sets, their variants, or frames that contain them.");
             return;
         }
-        const groupedIssues = [];
+        // Every problem is a show-stopper: check all sets first, change nothing until all of them are fine
+        const plans = [];
+        const failed = [];
         for (const setNode of sets) {
-            const group = Inspector.collectRotationIssuesGrouped(setNode);
-            if (group)
-                groupedIssues.push(group);
+            const result = check(setNode);
+            if ("plan" in result)
+                plans.push(result.plan);
+            else
+                failed.push({ set: setNode, problems: result.problems });
         }
-        if (groupedIssues.length) {
-            Logger.error("Found nodes with Rotation ≠ 0. See generated report.");
+        if (failed.length) {
+            const count = failed.reduce((n, g) => n + g.problems.length, 0);
+            Logger.error(`Found ${count} problem${count === 1 ? "" : "s"} in ${failed.length} set${failed.length === 1 ? "" : "s"}. ` +
+                "Nothing was changed — see the report on the canvas.");
             try {
-                yield createRotationReport(groupedIssues, sets[0]);
-            }
-            catch ( /* toast already shown */_a) { /* toast already shown */ }
-            return;
-        }
-        let processed = 0;
-        for (const setNode of sets) {
-            Logger.info(`Processing: ${setNode.name}`);
-            let error;
-            try {
-                error = layOut(setNode);
+                yield createReport(failed);
             }
             catch (e) {
-                error = `"${setNode.name}": ${errorMessage(e)}`;
+                Logger.error(`Could not create the report (${errorMessage(e)}). First problem in "${failed[0].set.name}": ${failed[0].problems[0]}`);
             }
-            if (error) {
-                Logger.error(error);
-                continue;
-            }
-            processed++;
-            Logger.info(`📐 Size: ${setNode.width}×${setNode.height}`);
-        }
-        if (!processed) {
-            Logger.error("No ComponentSets were updated. Check the errors above.");
             return;
+        }
+        for (const { set, info, positions } of plans) {
+            Logger.info(`Processing: ${set.name}`);
+            try {
+                LayoutService.apply(info, positions, set);
+            }
+            catch (e) {
+                throw new Error(`"${set.name}": ${errorMessage(e)}`);
+            }
+            Logger.info(`📐 Size: ${set.width}×${set.height}`);
         }
         if (auto)
             arrangeRow(sets);
         figma.viewport.scrollAndZoomIntoView(sets);
-        figma.notify(`✅ Done! ${processed} ComponentSet${processed === 1 ? "" : "s"} updated.`);
+        figma.notify(`✅ Done! ${plans.length} ComponentSet${plans.length === 1 ? "" : "s"} updated.`);
     });
 }
 (function main() {

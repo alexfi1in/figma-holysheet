@@ -19,6 +19,19 @@ function component(props) {
   };
 }
 
+// Plugin data and remove(), as every Figma node has them
+function withNodeBasics(node) {
+  const data = {};
+  node.getPluginData = key => data[key] || "";
+  node.setPluginData = (key, value) => { data[key] = value; };
+  node.remove = () => {
+    const k = node.parent ? node.parent.children.indexOf(node) : -1;
+    if (k >= 0) node.parent.children.splice(k, 1);
+    node.parent = null;
+  };
+  return node;
+}
+
 // Like Figma, inserting a node takes it out of its previous parent
 function insertChild(parent, i, node) {
   if (node.parent && node.parent.children) {
@@ -30,21 +43,25 @@ function insertChild(parent, i, node) {
 }
 
 function componentSet(name, variants) {
-  const set = {
+  const set = withNodeBasics({
     type: "COMPONENT_SET", name, x: 0, y: 0, width: 0, height: 0, children: variants,
     insertChild(i, node) { insertChild(this, i, node); },
     resizeWithoutConstraints(w, h) { this.width = w; this.height = h; },
-  };
+    get absoluteBoundingBox() {
+      const p = this.parent && this.parent.type === "FRAME" ? this.parent : { x: 0, y: 0 };
+      return { x: p.x + this.x, y: p.y + this.y, width: this.width, height: this.height };
+    },
+  });
   variants.forEach(v => { v.parent = set; });
   return set;
 }
 
 function frame(name, children) {
-  const f = {
+  const f = withNodeBasics({
     type: "FRAME", name, x: 0, y: 0, children,
     insertChild(i, node) { insertChild(this, i, node); },
     findAllWithCriteria: ({ types }) => children.filter(c => types.includes(c.type)),
-  };
+  });
   children.forEach(c => { c.parent = f; });
   return f;
 }
@@ -58,28 +75,49 @@ function variants(values) {
   return combos.map(component);
 }
 
+function textNode(characters = "") {
+  return withNodeBasics({
+    type: "TEXT", name: "Text", characters, x: 0, y: 0, width: 400,
+    get height() { return this.characters.split("\n").length * 16; },
+    setRangeFontName() {}, setRangeFontSize() {}, setRangeFills() {},
+  });
+}
+
 // `sets` are all sets on the page (also those inside `frames`); sets without a parent lie on the page itself
-function runPlugin(sets, { selection = [], frames = [], failLoad = false } = {}) {
+function makePage(sets, { selection = [], frames = [], others = [], failLoad = false } = {}) {
   const page = {
-    type: "PAGE", children: [], selection,
-    async loadAsync() { if (failLoad) throw new Error("page failed to load"); },
+    type: "PAGE", children: [], selection, failLoad,
+    async loadAsync() { if (this.failLoad) throw new Error("page failed to load"); },
     findAllWithCriteria: ({ types }) => sets.filter(s => types.includes(s.type)),
     insertChild(i, node) { insertChild(this, i, node); },
     appendChild(node) { insertChild(this, this.children.length, node); },
   };
-  for (const node of [...sets.filter(s => !s.parent), ...frames]) page.appendChild(node);
+  for (const node of [...sets.filter(s => !s.parent), ...frames, ...others]) page.appendChild(node);
+  return page;
+}
+
+// Runs the plugin once; resolves with its notifications, plus `zooms` (every scrollAndZoomIntoView call)
+function runOn(page) {
   const notes = [];
+  notes.zooms = [];
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("the plugin never called closePlugin")), 1000);
     const figma = {
       currentPage: page,
       notify: (msg, opts) => notes.push({ msg, error: Boolean(opts && opts.error) }),
       closePlugin: () => { clearTimeout(timer); resolve(notes); },
-      viewport: { scrollAndZoomIntoView() {} },
+      viewport: { scrollAndZoomIntoView: nodes => notes.zooms.push(nodes) },
+      createText: () => textNode(),
+      loadFontAsync: async () => {},
     };
     vm.runInNewContext(CODE, { figma, console: { log() {}, error() {} } });
   });
 }
+
+const runPlugin = (sets, options) => runOn(makePage(sets, options));
+
+// The plugin's report texts on the page (anything else on the page is the designer's)
+const reportsOn = page => page.children.filter(n => n.type === "TEXT" && n.name === "HolySheet report");
 
 const errorsOf = notes => notes.filter(n => n.error).map(n => n.msg);
 const atOrigin = set => set.children.every(v => v.x === 0 && v.y === 0);
@@ -172,15 +210,6 @@ test("places Set blocks left to right: fluent, desktop_classic, blazor_classic",
   assert.deepEqual(row, ["fluent", "desktop_classic", "blazor_classic"]);
 });
 
-test("names the Palette property when a set lacks it", async () => {
-  const set = componentSet("add", variants({ Set: ["fluent"], Style: ["regular"], Size: ["16"] }));
-
-  const notes = await runPlugin([set]);
-
-  const errors = notes.filter(n => n.error).map(n => n.msg);
-  assert.ok(errors.some(m => m.includes("Style/Palette/Size")), errors.join("\n"));
-});
-
 const ICON = { Set: ["fluent"], Style: ["regular"], Palette: ["neutral"], Size: ["16"] };
 
 // Whole-page mode
@@ -215,21 +244,6 @@ test("whole-page mode leaves sets inside frames in their frame and place", async
   assert.equal(onPage.parent.type, "PAGE");
   assert.deepEqual([onPage.x, onPage.y], [0, 0]);
 });
-
-test("whole-page mode keeps a skipped set in the row instead of under the others", async () => {
-  const a = componentSet("a", variants(ICON));
-  const noPalette = componentSet("b", variants({ Set: ["fluent"], Style: ["regular"], Size: ["16"] }));
-  noPalette.width = 100; noPalette.height = 50;
-  const c = componentSet("c", variants(ICON));
-  a.x = 500; c.x = 1000;
-
-  await runPlugin([a, noPalette, c]);
-
-  assert.deepEqual([a.x, noPalette.x, c.x], [0, a.width + 20, a.width + 20 + 100 + 20]);
-  assert.deepEqual([a.y, noPalette.y, c.y], [0, 0, 0]);
-});
-
-// Selection
 
 test("a selected variant lays out its own set and leaves the rest of the page alone", async () => {
   const a = componentSet("a", variants(ICON));
@@ -273,19 +287,6 @@ test("a selection without component sets changes nothing and says what to select
 
 // Failures
 
-test("a set that throws is reported and the other sets are still laid out", async () => {
-  const broken = componentSet("broken", variants(ICON));
-  Object.defineProperty(broken.children[0], "variantProperties", {
-    get() { throw new Error("Component set has existing errors"); },
-  });
-  const fine = componentSet("fine", variants(ICON));
-
-  const notes = await runPlugin([broken, fine]);
-
-  assert.ok(errorsOf(notes).some(m => m.includes("broken") && m.includes("existing errors")), errorsOf(notes).join("\n"));
-  assert.deepEqual(grid(fine, "Palette"), [["regular/neutral/16"]]);
-});
-
 test("an unexpected failure closes the plugin with a message", async () => {
   const a = componentSet("a", variants(ICON));
 
@@ -315,4 +316,100 @@ test("puts an unknown Set block after the known ones, so it never becomes the de
 
   const row = [...set.children].sort((a, b) => a.x - b.x).map(v => v.variantProperties.Set);
   assert.deepEqual(row, ["fluent", "desktop_classic", "blazor_classic", "rtl"]);
+});
+
+test("names the Palette property when a set lacks it", async () => {
+  const page = makePage([componentSet("add", variants({ Set: ["fluent"], Style: ["regular"], Size: ["16"] }))]);
+
+  await runOn(page);
+
+  assert.match(reportsOn(page)[0].characters, /Style\/Palette\/Size/);
+});
+
+// Problems stop the run: nothing changes, a report on the canvas lists them
+
+const noPalette = name => componentSet(name, variants({ Set: ["fluent"], Style: ["regular"], Size: ["16"] }));
+
+test("a set with a problem stops the run: nothing changes, the report lists it and the viewport shows it", async () => {
+  const a = componentSet("a", variants(ICON));
+  const b = noPalette("b");
+  const c = componentSet("c", variants(ICON));
+  a.x = 500; b.x = 0; c.x = 1000;
+  const page = makePage([a, b, c]);
+
+  const notes = await runOn(page);
+
+  assert.ok(atOrigin(a) && atOrigin(b) && atOrigin(c), "no variant moved");
+  assert.deepEqual([a.x, b.x, c.x], [500, 0, 1000]);
+  assert.ok(errorsOf(notes).some(m => m.includes("Nothing was changed")), errorsOf(notes).join("\n"));
+  const [report] = reportsOn(page);
+  assert.match(report.characters, /• b\n.*Missing required variant properties/);
+  assert.doesNotMatch(report.characters, /• a\b|• c\b/);
+  // the array comes from the plugin's vm context, so compare its items
+  assert.deepEqual([...notes.zooms.at(-1)], [report]);
+});
+
+test("the report lists every problem of every set", async () => {
+  const twins = componentSet("twins", [...variants(ICON), ...variants(ICON)]);
+  const turned = componentSet("turned", variants(ICON));
+  turned.children[0].rotation = 90;
+  const bare = noPalette("bare");
+  const broken = componentSet("broken", variants(ICON));
+  Object.defineProperty(broken.children[0], "variantProperties", {
+    get() { throw new Error("Component set has existing errors"); },
+  });
+  const page = makePage([twins, turned, bare, broken]);
+
+  await runOn(page);
+
+  const text = reportsOn(page)[0].characters;
+  for (const expected of [
+    /• bare\n.*Missing required variant properties/,
+    /• broken\n.*Component set has existing errors/,
+    /• turned\n.*Rotation.*Set=fluent, Style=regular, Palette=neutral, Size=16/,
+    /• twins\n.*Duplicate variant properties/,
+  ]) assert.match(text, expected);
+});
+
+test("the report sits above the sets in page coordinates without covering them", async () => {
+  const b = noPalette("b");
+  b.x = 20; b.y = 30;
+  const drafts = frame("Drafts", [b]);
+  drafts.x = 1000; drafts.y = 500;
+  const page = makePage([b], { frames: [drafts] });
+
+  await runOn(page);
+
+  const [report] = reportsOn(page);
+  assert.equal(report.parent, page);
+  assert.equal(report.x, 1020);
+  assert.ok(report.y + report.height <= 530, `report ends at ${report.y + report.height}, the set starts at 530`);
+});
+
+test("a new run replaces the previous report, a clean run removes it, the designer's texts stay", async () => {
+  const b = noPalette("b");
+  const designersNote = textNode("my notes");
+  designersNote.name = "HolySheet report";
+  const page = makePage([b], { others: [designersNote] });
+
+  await runOn(page);
+  await runOn(page);
+  assert.equal(page.children.filter(n => n.type === "TEXT").length, 2, "the designer's note and one report");
+
+  for (const v of b.children) v.variantProperties = { ...v.variantProperties, Palette: "neutral" };
+  const notes = await runOn(page);
+
+  assert.deepEqual(errorsOf(notes), []);
+  assert.deepEqual(page.children.filter(n => n.type === "TEXT"), [designersNote]);
+  assert.ok(!atOrigin(b), "b was laid out");
+});
+
+test("a failure while laying out closes the plugin with a message naming the set", async () => {
+  const a = componentSet("a", variants(ICON));
+  const b = componentSet("b", variants(ICON));
+  b.resizeWithoutConstraints = () => { throw new Error("boom"); };
+
+  const notes = await runPlugin([a, b]);
+
+  assert.ok(errorsOf(notes).some(m => m.includes('"b"') && m.includes("boom")), errorsOf(notes).join("\n"));
 });

@@ -32,21 +32,22 @@ Run the plugin in one of two modes:
 
 **Selection** — select component sets, any of their variants or layers, or frames, sections and groups that contain sets. Only those sets are laid out; they stay where they are. A selection with no sets in it changes nothing and says so.
 
-**Whole page** — run with nothing selected. Every `ComponentSet` on the current page is laid out. The sets lying directly on the page are then lined up in one row, sorted by name, with a gap between them — including sets that were skipped because of an error, so nothing overlaps. Sets inside frames and sections keep their place.
+**Whole page** — run with nothing selected (by design). Every `ComponentSet` on the current page is laid out. The sets lying directly on the page are then lined up in one row, sorted by name, with a gap between them. Sets inside frames and sections keep their place.
 
 ---
 
 ## Pre-checks
 
-Before any layout is applied, the plugin validates the data:
+Before changing anything, the plugin checks every set it is about to lay out:
 
-**Rotation check** — if any variant has `Rotation ≠ 0`, the plugin stops entirely and inserts a styled text report on the canvas, grouped by `ComponentSet`. No layout is applied until rotations are fixed.
+- a variant with `Rotation ≠ 0`
+- duplicate variants — two variants with the same combination of property values
+- missing `Style`, `Palette` (or the old `Color`) or `Size` properties
+- a set Figma can't read (for example, one it reports as having errors)
 
-**Duplicate variants** — if two variants share the same combination of property values, the plugin reports the conflict and skips that set.
+**Every problem is a show-stopper.** If any set has one, nothing is changed: a report on the canvas lists every problem, grouped by set, above the first set with problems, and the viewport moves to it. Fix the problems and run the plugin again — the new run replaces the report, and a clean run removes it. The plugin removes only the reports it created itself (it marks them with plugin data), never your own texts.
 
-**Missing properties** — if a `ComponentSet` is missing `Style`, `Palette` (or the old `Color`), or `Size` properties, it is skipped with an error message.
-
-**Errors** — a set that fails to lay out (for example, one Figma reports as having errors) is reported and skipped; the other sets are still processed. Any other failure stops the plugin with a message instead of leaving it hanging.
+If something still fails while the variants are being moved, the plugin stops and names the set instead of hanging.
 
 ---
 
